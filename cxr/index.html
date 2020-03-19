@@ -1,0 +1,44 @@
+<link rel="stylesheet" href="site.css" />
+
+<!-- Load TensorFlow.js. This is required to use MobileNet. -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.0.1"> </script>
+
+<!-- Load the MobileNet model. -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@1.0.0"> </script>
+
+<div id="page">
+
+<h1>Pneumonia severity predction.</h1>
+
+<h2>Approve requests to use the camera.</h2>
+
+<!-- Replace this with your image. Make sure CORS settings allow reading the image! -->
+<video autoplay id="cxrVideo">Waiting for video...</video>
+<img id="cxrImage" src="skeleton.svg" width=500 height=500></img>
+
+</div>
+
+<script>
+
+  navigator.mediaDevices.getUserMedia({video: true})
+  .then(mediaStream => {
+    console.log(mediaStream);
+    document.getElementById('cxrVideo').srcObject = mediaStream;
+  });
+
+
+
+  const img = document.getElementById('cxrImage');
+
+  // Load the model.
+  mobilenet.load().then(model => {
+    // Classify the image.
+    model.classify(img).then(predictions => {
+      console.log('Predictions: ');
+      console.log(predictions);
+    });
+  });
+
+
+
+</script>
