@@ -10,35 +10,69 @@
 
 <h1>Pneumonia severity predction.</h1>
 
-<h2>Approve requests to use the camera.</h2>
+<h2 id="cxrApprove">Approve requests to use the camera.</h2>
 
-<!-- Replace this with your image. Make sure CORS settings allow reading the image! -->
-<video autoplay id="cxrVideo">Waiting for video...</video>
+<video autoplay id="cxrVideo" hidden=true>Waiting for video...</video>
 <img id="cxrImage" src="skeleton.svg" width=500 height=500></img>
+<canvas id="cxrCanvas"></canvas>
 
 </div>
 
 <script>
 
+  const mobilenetLoadPromise = mobilenet.load();
+
+  const imageElement = document.getElementById('cxrImage');
+  const videoElement = document.getElementById('cxrVideo');
+  const canvasElement = document.getElementById('cxrCanvas');
+  const approveNotice = document.getElementById('cxrApprove');
+
+  let imageCapture;
+  let imageData, imageDataURL;
+
   navigator.mediaDevices.getUserMedia({video: true})
   .then(mediaStream => {
-    console.log(mediaStream);
     document.getElementById('cxrVideo').srcObject = mediaStream;
-  });
+    imageElement.hidden = true;
+    approveNotice.hidden = false;
+    videoElement.hidden = false;
 
+    imageCapture = new ImageCapture(mediaStream.getVideoTracks()[0]);
 
-
-  const img = document.getElementById('cxrImage');
-
-  // Load the model.
-  mobilenet.load().then(model => {
-    // Classify the image.
-    model.classify(img).then(predictions => {
-      console.log('Predictions: ');
-      console.log(predictions);
+    mobilenetLoadPromise
+    .then(model => {
+      imageCapture.grabFrame()
+      .then(imageBitmap => {
+        imageBitmapToImages(canvasElement, imageBitmap);
+        videoElement.hidden=true;
+        canvasElement.hidden = true;
+        imageElement.hidden = false;
+        imageElement.src = imageDataURL;
+        imageElement.width = imageData.width;
+        imageElement.height = imageData.height;
+        model.classify(imageData)
+        .then(predictions => {
+          const header = document.createElement("h2");
+          header.innerText = 'Predictions ';
+          const result = document.createElement("p");
+          result.innerText = JSON.stringify(predictions);
+          document.body.appendChild(header);
+          document.body.appendChild(result);
+        });
+      });
     });
   });
 
+
+
+  function imageBitmapToImages(canvas, imageBitmap) {
+    canvas.width = imageBitmap.width;
+    canvas.height = imageBitmap.height;
+    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+    canvas.getContext('2d').drawImage(imageBitmap, 0, 0);
+    imageData = canvas.getContext('2d').getImageData(0, 0, imageBitmap.width, imageBitmap.height);
+    imageDataURL = canvas.toDataURL("image/png");
+  }
 
 
 </script>
