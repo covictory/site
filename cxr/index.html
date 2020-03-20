@@ -6,73 +6,66 @@
 <!-- Load the MobileNet model. -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@1.0.0"> </script>
 
+<!-- thirdparty -->
+<script src="thirdparty/dropzone.min.js"> </script>
+<link rel="stylesheet" href="thirdparty/dropzone.min.css"/>
+
 <div id="page">
 
 <h1>Pneumonia severity predction.</h1>
 
-<h2 id="cxrApprove">Approve requests to use the camera.</h2>
+<img id="cxrImage" src="skeleton.svg" width=500 width=500></img>
 
-<video autoplay id="cxrVideo" hidden=true>Waiting for video...</video>
-<img id="cxrImage" src="skeleton.svg" width=500 height=500></img>
-<canvas id="cxrCanvas"></canvas>
+<h2 id="cxrStatus">Downloading predictive model...</h2>
 
-</div>
+<form action="/file-upload"
+      class="dropzone"
+      id="cxrDropzone"></form>
 
 <script>
 
   const mobilenetLoadPromise = mobilenet.load();
 
   const imageElement = document.getElementById('cxrImage');
-  const videoElement = document.getElementById('cxrVideo');
-  const canvasElement = document.getElementById('cxrCanvas');
-  const approveNotice = document.getElementById('cxrApprove');
+  const dropzoneElement = document.getElementById('cxrDropzone');
+  let model;
 
-  let imageCapture;
-  let imageData, imageDataURL;
+  mobilenetLoadPromise
+  .then(loadedModel => {
+    model = loadedModel;
+    document.getElementById('cxrStatus').innerText = "Model is ready";
+  });
 
-  navigator.mediaDevices.getUserMedia({video: true})
-  .then(mediaStream => {
-    document.getElementById('cxrVideo').srcObject = mediaStream;
-    imageElement.hidden = true;
-    approveNotice.hidden = false;
-    videoElement.hidden = false;
-
-    imageCapture = new ImageCapture(mediaStream.getVideoTracks()[0]);
-
-    mobilenetLoadPromise
-    .then(model => {
-      imageCapture.grabFrame()
-      .then(imageBitmap => {
-        imageBitmapToImages(canvasElement, imageBitmap);
-        videoElement.hidden=true;
-        canvasElement.hidden = true;
-        imageElement.hidden = false;
-        imageElement.src = imageDataURL;
-        imageElement.width = imageData.width;
-        imageElement.height = imageData.height;
-        model.classify(imageData)
-        .then(predictions => {
-          const header = document.createElement("h2");
-          header.innerText = 'Predictions ';
-          const result = document.createElement("p");
-          result.innerText = JSON.stringify(predictions);
-          document.body.appendChild(header);
-          document.body.appendChild(result);
-        });
-      });
+/*
+    model.classify(imageElement)
+    .then(predictions => {
+      const header = document.createElement("h2");
+      header.innerText = 'Predictions ';
+      const result = document.createElement("p");
+      result.innerText = JSON.stringify(predictions);
+      document.body.appendChild(header);
+      document.body.appendChild(result);
     });
+  });
+  */
+
+</script>
+
+<script>
+// code that needs to execute after document body is loaded
+(function() {
+  Dropzone.autoDiscover = false;
+  dropzone = new Dropzone(dropzoneElement, {
+    autoProcessQueue: true,
+    accept: (file, doneFunction) => {
+      console.log("in accept...");
+      console.log(file);
+    },
+  });
+  dropzone.on("addedfile", file => {
+    console.log(file);
   });
 
 
-
-  function imageBitmapToImages(canvas, imageBitmap) {
-    canvas.width = imageBitmap.width;
-    canvas.height = imageBitmap.height;
-    canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
-    canvas.getContext('2d').drawImage(imageBitmap, 0, 0);
-    imageData = canvas.getContext('2d').getImageData(0, 0, imageBitmap.width, imageBitmap.height);
-    imageDataURL = canvas.toDataURL("image/png");
-  }
-
-
+})();
 </script>
