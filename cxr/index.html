@@ -14,14 +14,14 @@
 
 <h1>Pneumonia severity prediction.</h1>
 
-<img id="cxrImage" src="skeleton.svg" width=500 width=500></img>
+<img id="cxrImage" src="skeleton.svg" width=50 width=50></img>
 
 <h2 id="cxrStatus">Downloading predictive model...</h2>
 
 <form action="/file-upload"
       class="dropzone"
       id="cxrDropzone">
-  <p class="dz-message">Drop chest X ray images here, or click to upload</p>
+  <p class="dz-message">Drop chest X ray image here, or click to upload</p>
 </form>
 
 <script>
@@ -29,6 +29,7 @@
   const mobilenetLoadPromise = mobilenet.load();
 
   const imageElement = document.getElementById('cxrImage');
+  const imageLogoSource = imageElement.src;
   const dropzoneElement = document.getElementById('cxrDropzone');
   let model;
   let classifying = false;
@@ -50,6 +51,7 @@
     classifying = true;
     const file = filesToProcess.pop();
     console.log('classifying ', file.name);
+    document.getElementById('cxrStatus').innerText = "Working...";
     dropzone.removeFile(file);
     imageElement.src = file.dataURL;
     imageElement.onload = function() {
@@ -69,6 +71,7 @@
         img.width = 200
         classifying = false
         console.log('classify finished', file.name);
+        document.getElementById('cxrStatus').innerText = "Finished...";
         triggerClassify();
       });
     }
