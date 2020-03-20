@@ -1,3 +1,16 @@
+<head>
+
+  <!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=UA-161484045-1"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'UA-161484045-1');
+</script>
+
+
 <link rel="stylesheet" href="site.css" />
 
 <!-- Load TensorFlow.js. This is required to use MobileNet. -->
@@ -6,6 +19,10 @@
 <!-- thirdparty -->
 <script src="thirdparty/dropzone.min.js"> </script>
 <link rel="stylesheet" href="thirdparty/dropzone.min.css"/>
+
+</head>
+
+<body>
 
 <div id="page">
 
@@ -66,15 +83,15 @@
         const header = document.createElement("h2");
         document.body.appendChild(header);
         header.innerText = `Predictions for ${file.name}`;
+        const img = document.createElement("img");
+        document.body.appendChild(img);
+        img.src = file.dataURL;
+        img.width = 200
         for (index = 0; index < data.length; index++) {
           const result = document.createElement("p");
           result.innerText = `${pneumoniaPredictions[index]}: ${data[index]}`
           document.body.appendChild(result);
         }
-        const img = document.createElement("img");
-        document.body.appendChild(img);
-        img.src = file.dataURL;
-        img.width = 200
         predicting = false
         console.log('predict finished', file.name);
         document.getElementById('cxrStatus').innerText = "Finished...";
@@ -105,3 +122,5 @@
 
 })();
 </script>
+
+</body>
