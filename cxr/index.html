@@ -12,7 +12,7 @@
 
 <div id="page">
 
-<h1>Pneumonia severity predction.</h1>
+<h1>Pneumonia severity prediction.</h1>
 
 <img id="cxrImage" src="skeleton.svg" width=500 width=500></img>
 
@@ -20,7 +20,9 @@
 
 <form action="/file-upload"
       class="dropzone"
-      id="cxrDropzone"></form>
+      id="cxrDropzone">
+  <p class="dz-message">Drop chest X ray images here, or click to upload</p>
+</form>
 
 <script>
 
@@ -29,25 +31,48 @@
   const imageElement = document.getElementById('cxrImage');
   const dropzoneElement = document.getElementById('cxrDropzone');
   let model;
+  let classifying = false;
+  const filesToProcess = [];
 
   mobilenetLoadPromise
   .then(loadedModel => {
     model = loadedModel;
     document.getElementById('cxrStatus').innerText = "Model is ready";
+    triggerClassify()
   });
 
-/*
-    model.classify(imageElement)
-    .then(predictions => {
-      const header = document.createElement("h2");
-      header.innerText = 'Predictions ';
-      const result = document.createElement("p");
-      result.innerText = JSON.stringify(predictions);
-      document.body.appendChild(header);
-      document.body.appendChild(result);
-    });
-  });
-  */
+  function triggerClassify() {
+    console.log('triggered for ', filesToProcess);
+    if (classifying || filesToProcess.length == 0) {
+      console.log('returning');
+      return;
+    }
+    classifying = true;
+    const file = filesToProcess.pop();
+    console.log('classifying ', file.name);
+    dropzone.removeFile(file);
+    imageElement.src = file.dataURL;
+    imageElement.onload = function() {
+      model.classify(imageElement)
+      .then(predictions => {
+        const header = document.createElement("h2");
+        document.body.appendChild(header);
+        header.innerText = `Predictions for ${file.name}`;
+        predictions.forEach(prediction => {
+          const result = document.createElement("p");
+          result.innerText = `${prediction.className}: ${prediction.probability}`
+          document.body.appendChild(result);
+        })
+        const img = document.createElement("img");
+        document.body.appendChild(img);
+        img.src = file.dataURL;
+        img.width = 200
+        classifying = false
+        console.log('classify finished', file.name);
+        triggerClassify();
+      });
+    }
+  }
 
 </script>
 
@@ -57,15 +82,17 @@
   Dropzone.autoDiscover = false;
   dropzone = new Dropzone(dropzoneElement, {
     autoProcessQueue: true,
-    accept: (file, doneFunction) => {
-      console.log("in accept...");
-      console.log(file);
-    },
   });
-  dropzone.on("addedfile", file => {
-    console.log(file);
+  dropzone.on("error", (file) => {
+    console.log("error triggered", file);
+    dropzone.getAcceptedFiles().forEach(file => {
+      if (file.dataURL  && filesToProcess.indexOf(file) == -1) {
+        filesToProcess.unshift(file);
+      }
+    });
+    console.log('trigger classify', filesToProcess)
+    triggerClassify();
   });
-
 
 })();
 </script>
