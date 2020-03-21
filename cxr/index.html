@@ -99,32 +99,34 @@
     predicting = true;
     const file = filesToProcess.pop();
     status(`Predicting ${file.name}...`);
-    imageElement.src = file.dataURL;
-    imageElement.onload = function() {
-      dropzone.removeFile(file);
-      const tensor = tf.browser.fromPixels(imageElement);
-      const reshapedTensor = tensor.reshape([-1, imageElement.height, imageElement.width, 3]);
-      predictionTensor = model.predict(reshapedTensor, {verbose: true})
-      predictionTensor.data()
-      .then(data => {
-        const header = document.createElement("h2");
-        document.body.appendChild(header);
-        header.innerText = `Predictions for ${file.name}`;
-        const img = document.createElement("img");
-        document.body.appendChild(img);
-        img.src = file.dataURL;
-        img.width = 200
-        for (index = 0; index < data.length; index++) {
-          const result = document.createElement("p");
-          result.innerText = `${pneumoniaPredictions[index]}: ${data[index]}`
-          document.body.appendChild(result);
-        }
-        predicting = false
-        filesProcessed.unshift(file);
-        status(`Finished predicting ${file.name}.`);
-        checkAcceptedFiles();
-      });
-    }
+    setTimeout(() => {
+      imageElement.src = file.dataURL;
+      imageElement.onload = function() {
+        dropzone.removeFile(file);
+        const tensor = tf.browser.fromPixels(imageElement);
+        const reshapedTensor = tensor.reshape([-1, imageElement.height, imageElement.width, 3]);
+        predictionTensor = model.predict(reshapedTensor, {verbose: true})
+        predictionTensor.data()
+        .then(data => {
+          const header = document.createElement("h2");
+          document.body.appendChild(header);
+          header.innerText = `Predictions for ${file.name}`;
+          const img = document.createElement("img");
+          document.body.appendChild(img);
+          img.src = file.dataURL;
+          img.width = 200
+          for (index = 0; index < data.length; index++) {
+            const result = document.createElement("p");
+            result.innerText = `${pneumoniaPredictions[index]}: ${data[index]}`
+            document.body.appendChild(result);
+          }
+          predicting = false
+          filesProcessed.unshift(file);
+          status(`Finished predicting ${file.name}.`);
+          checkAcceptedFiles();
+        });
+      }
+    }, 5);
   }
 
 </script>
