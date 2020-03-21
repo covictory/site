@@ -61,6 +61,22 @@
   let model;
   let predicting = false;
   const filesToProcess = [];
+  const filesProcessed = [];
+
+  function checkAcceptedFiles(file) {
+    file = file || {name: "unspecified"};
+    console.log("error triggered", file.name);
+    dropzone.getAcceptedFiles().forEach(file => {
+      console.log(`checking ${file.name}`);
+      if (file.dataURL
+            && filesToProcess.indexOf(file) == -1) {
+        status(`adding ${file.name}`);
+        filesToProcess.unshift(file);
+      }
+    });
+    console.log('trigger predict', filesToProcess)
+    triggerPrediction();
+  }
 
   modelLoadPromise
   .then(loadedModel => {
@@ -72,20 +88,21 @@
   function triggerPrediction() {
     console.log('triggered for ', filesToProcess);
     if (predicting || filesToProcess.length == 0) {
-      console.log('returning');
+      if (!predicting) {
+        //imageElement.src = "skeleton.svg";
+      }
+      console.log('triggered, but nothing to predict');
       console.log('predicting', predicting);
       console.log('filesToProcess', filesToProcess);
       return;
     }
     predicting = true;
     const file = filesToProcess.pop();
-    status('Predicting ', file.name);
-    dropzone.removeFile(file);
+    status(`Predicting ${file.name}...`);
     imageElement.src = file.dataURL;
     imageElement.onload = function() {
+      dropzone.removeFile(file);
       const tensor = tf.browser.fromPixels(imageElement);
-      status(tensor.shape);
-      status([1, imageElement.height, imageElement.width, 3]);
       const reshapedTensor = tensor.reshape([-1, imageElement.height, imageElement.width, 3]);
       predictionTensor = model.predict(reshapedTensor, {verbose: true})
       predictionTensor.data()
@@ -103,8 +120,9 @@
           document.body.appendChild(result);
         }
         predicting = false
+        filesProcessed.unshift(file);
         status(`Finished predicting ${file.name}.`);
-        triggerPrediction();
+        checkAcceptedFiles();
       });
     }
   }
@@ -117,17 +135,9 @@
   Dropzone.autoDiscover = false;
   dropzone = new Dropzone(dropzoneElement, {
     autoProcessQueue: true,
+    parallelUploads: 1,
   });
-  dropzone.on("error", (file) => {
-    console.log("error triggered", file);
-    dropzone.getAcceptedFiles().forEach(file => {
-      if (file.dataURL  && filesToProcess.indexOf(file) == -1) {
-        filesToProcess.unshift(file);
-      }
-    });
-    console.log('trigger predict', filesToProcess)
-    triggerPrediction();
-  });
+  dropzone.on("error", checkAcceptedFiles);
 
 })();
 </script>
