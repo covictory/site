@@ -1,6 +1,6 @@
 <head>
 
-  <!-- Global site tag (gtag.js) - Google Analytics -->
+<!-- Global site tag (gtag.js) - Google Analytics -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=UA-161484045-1"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -14,7 +14,7 @@
 <link rel="stylesheet" href="site.css" />
 
 <!-- Load TensorFlow.js. This is required to use MobileNet. -->
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.0.1"> </script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.7.0"> </script>
 
 <!-- thirdparty -->
 <script src="thirdparty/dropzone.min.js"> </script>
@@ -26,12 +26,12 @@
 
 <div id="page">
 
-<h1>Pneumonia severity prediction prototype</h1>
-<p>Not validated for any purpose</p>
+<h1>Pneumonia severity prediction (prototype)</h1>
+<p>For informational use only. Not validated for any other purpose.</p>
 
 <img id="cxrImage" src="skeleton.svg" width=50 width=50></img>
 
-<h2 id="cxrStatus">Downloading predictive model...</h2>
+<h2 id="cxrStatus"></h2>
 
 <form action="/file-upload"
       class="dropzone"
@@ -40,13 +40,20 @@
 </form>
 
 <script>
+  function status(message) {
+    console.log(message);
+    document.getElementById('cxrStatus').innerText = message;
+  }
 
   const pneumoniaPredictions = [ "Atelectasis", "Cardiomegaly", "Consolidation", "Edema",
     "Effusion", "Emphysema", "Fibrosis", "Hernia", "Infiltration", "Mass", "Nodule",
     "Pleural Thickening", "Pneumonia", "Pneumothora"]
 
   const modelURL = 'https://storage.googleapis.com/cxr-models/CheXNet_acil-tfjs/model.json';
-  const modelLoadPromise = tf.loadLayersModel(modelURL);
+  status('Downloading predictive model');
+  const modelLoadPromise = tf.loadLayersModel(modelURL, {
+    onProgress: (fraction) => {status(`${(fraction * 100).toFixed(1)}% loaded...`);},
+  });
 
   const imageElement = document.getElementById('cxrImage');
   const imageLogoSource = imageElement.src;
@@ -58,7 +65,7 @@
   modelLoadPromise
   .then(loadedModel => {
     model = loadedModel;
-    document.getElementById('cxrStatus').innerText = "Model is ready";
+    status("Model is ready");
     triggerPrediction()
   });
 
@@ -71,7 +78,7 @@
     predicting = true;
     const file = filesToProcess.pop();
     console.log('predicting ', file.name);
-    document.getElementById('cxrStatus').innerText = "Working...";
+    status("Working...");
     dropzone.removeFile(file);
     imageElement.src = file.dataURL;
     imageElement.onload = function() {
@@ -94,7 +101,7 @@
         }
         predicting = false
         console.log('predict finished', file.name);
-        document.getElementById('cxrStatus').innerText = "Finished...";
+        status("Finished...");
         triggerPrediction();
       });
     }

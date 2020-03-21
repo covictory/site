@@ -23,3 +23,6 @@ tags
 
 # Ignore pyc files ...
 *.pyc
+
+# ignore the sample images
+samples
