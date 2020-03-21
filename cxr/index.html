@@ -29,7 +29,7 @@
 <h1>Pneumonia severity prediction (prototype)</h1>
 <p>For informational use only. Not validated for any other purpose.</p>
 
-<img id="cxrImage" src="skeleton.svg" width=50 width=50></img>
+<img id="cxrImage" src="skeleton.svg" width=254 width=254></img>
 
 <h2 id="cxrStatus"></h2>
 
@@ -73,18 +73,21 @@
     console.log('triggered for ', filesToProcess);
     if (predicting || filesToProcess.length == 0) {
       console.log('returning');
+      console.log('predicting', predicting);
+      console.log('filesToProcess', filesToProcess);
       return;
     }
     predicting = true;
     const file = filesToProcess.pop();
-    console.log('predicting ', file.name);
-    status("Working...");
+    status('Predicting ', file.name);
     dropzone.removeFile(file);
     imageElement.src = file.dataURL;
     imageElement.onload = function() {
       const tensor = tf.browser.fromPixels(imageElement);
-      const reshapedTensor = tensor.reshape([1, imageElement.height, imageElement.width, 3]);
-      predictionTensor = model.predict(reshapedTensor)
+      status(tensor.shape);
+      status([1, imageElement.height, imageElement.width, 3]);
+      const reshapedTensor = tensor.reshape([-1, imageElement.height, imageElement.width, 3]);
+      predictionTensor = model.predict(reshapedTensor, {verbose: true})
       predictionTensor.data()
       .then(data => {
         const header = document.createElement("h2");
@@ -100,8 +103,7 @@
           document.body.appendChild(result);
         }
         predicting = false
-        console.log('predict finished', file.name);
-        status("Finished...");
+        status(`Finished predicting ${file.name}.`);
         triggerPrediction();
       });
     }
