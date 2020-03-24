@@ -1,6 +1,11 @@
 BODY {
 	font-family: Helvetica, Arial, Sans-Serif;
-	font-size: 3vw;
+}
+
+@media only screen and (max-width: 100em) {
+   body {
+	  font-size: 2vw;
+   }
 }
 
 BODY H1 {
