@@ -26,7 +26,7 @@
 
 <div id="page">
 
-<h1>Pneumonia severity prediction (prototype)</h1>
+<h1>Chest X Ray QC (prototype)</h1>
 <p>For informational use only. Not validated for any other purpose.</p>
 
 <img id="cxrLogo" src="skeleton.svg" width=100 height=100></img>
@@ -113,16 +113,18 @@
         .then(data => {
           const header = document.createElement("h2");
           document.body.appendChild(header);
-          header.innerText = `Predictions for ${file.name}`;
+          header.innerText = `Results for: ${file.name}`;
           const reportThumbndail = document.createElement("img");
           document.body.appendChild(reportThumbndail);
           reportThumbndail.src = file.dataURL;
           reportThumbndail.width = 200
-          for (index = 0; index < data.length; index++) {
-            const result = document.createElement("p");
-            result.innerText = `Result ${index}: ${data[index]}`
-            document.body.appendChild(result);
+          const result = document.createElement("p");
+          if (data[1]) {
+            result.innerText = `Result: Good chest X ray!`;
+          } else {
+            result.innerText = `Result: Bad chest X ray!`;
           }
+          document.body.appendChild(result);
           predicting = false
           filesProcessed.unshift(file);
           status(`Finished predicting ${file.name}.`);
