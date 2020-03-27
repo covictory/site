@@ -13,7 +13,10 @@
 
 <link rel="stylesheet" href="site.css" />
 
-<!-- Load TensorFlow.js. This is required to use MobileNet. -->
+<!-- Load opencv.js -->
+<script src="thirdparty/opencv.js"> </script>
+
+<!-- Load TensorFlow.js -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.7.0"> </script>
 
 <!-- thirdparty -->
@@ -27,7 +30,7 @@
 <div id="page">
 
 <h1>Chest X Ray QC (prototype)</h1>
-<p>For informational use only. Not validated for any other purpose.</p>
+<p>For informational use only. Not validated for any purpose.</p>
 
 <img id="cxrLogo" src="skeleton.svg" width=100 height=100></img>
 
@@ -39,7 +42,15 @@
   <p class="dz-message">Drop chest X ray image here, or click to upload</p>
 </form>
 
+<div id="cxrResults"></div>
+
+<!-- for testing
 <img id="cxrImage" hidden=true width=1024 height=1024></img>
+<img id="cxrCanvas" hidden=true width=1024 height=1024></img>
+ -->
+<img id="cxrImage" width=1024 height=1024></img>
+<canvas id="cxrCanvas" width=1024 height=1024></canvas>
+
 
 <script>
 
@@ -59,6 +70,8 @@
   });
 
   const imageElement = document.getElementById('cxrImage');
+  const imageCanvas = document.getElementById('cxrCanvas');
+  let imageMatrix;
   const imageLogoSource = imageElement.src;
   const dropzoneElement = document.getElementById('cxrDropzone');
   let model;
@@ -90,10 +103,10 @@
 
   function triggerPrediction() {
     console.log('triggered for ', filesToProcess);
-    if (predicting || filesToProcess.length == 0) {
-      if (!predicting) {
-        //imageElement.src = "skeleton.svg";
-      }
+    if (predicting 
+          || filesToProcess.length == 0
+          || !model
+      ) {
       console.log('triggered, but nothing to predict');
       console.log('predicting', predicting);
       console.log('filesToProcess', filesToProcess);
@@ -106,25 +119,37 @@
       imageElement.src = file.dataURL;
       imageElement.onload = function() {
         dropzone.removeFile(file);
-        const tensor = tf.browser.fromPixels(imageElement).div(255);
+        // OpenCV
+console.time('opencv');
+        imageMatrix = cv.imread(imageElement); // TODO: normalize in cv
+        cv.cvtColor(imageMatrix, imageMatrix, cv.COLOR_RGB2GRAY,0 )
+        let tileGridSize = new cv.Size(imageElement.height / 8, imageElement.width / 8);
+        const clahe = new cv.CLAHE(40, tileGridSize);
+        clahe.setClipLimit(0.01 * 255);
+        clahe.apply(imageMatrix, imageMatrix);
+        cv.medianBlur(imageMatrix, imageMatrix, 5);
+        cv.imshow('cxrCanvas', imageMatrix);
+        imageMatrix.delete();
+console.timeEnd('opencv');
+        // tensorflow
+console.time('tensorflow');
+        const tensor = tf.browser.fromPixels(imageCanvas).div(255);
         const reshapedTensor = tensor.reshape([-1, imageElement.height, imageElement.width, 3]);
         predictionTensor = model.predict(reshapedTensor, {verbose: true})
         predictionTensor.data()
         .then(data => {
-          const header = document.createElement("h2");
-          document.body.appendChild(header);
+console.timeEnd('tensorflow');
+          const results = document.getElementById('cxrResults')
+          const header = document.createElement("h3");
+          results.appendChild(header);
           header.innerText = `Results for: ${file.name}`;
           const reportThumbndail = document.createElement("img");
-          document.body.appendChild(reportThumbndail);
+          results.appendChild(reportThumbndail);
           reportThumbndail.src = file.dataURL;
           reportThumbndail.width = 200
           const result = document.createElement("p");
-          if (data[1]) {
-            result.innerText = `Result: Good chest X ray!`;
-          } else {
-            result.innerText = `Result: Bad chest X ray!`;
-          }
-          document.body.appendChild(result);
+          result.innerText = `${(100 * data[1]).toFixed(2)}% probability of being a good chest X ray image`;
+          results.appendChild(result);
           predicting = false
           filesProcessed.unshift(file);
           status(`Finished predicting ${file.name}.`);
