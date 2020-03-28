@@ -19,9 +19,13 @@
 <!-- Load TensorFlow.js -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.7.0"> </script>
 
-<!-- thirdparty -->
+<!-- Load thirdparty -->
 <script src="thirdparty/dropzone.min.js"> </script>
 <link rel="stylesheet" href="thirdparty/dropzone.min.css"/>
+
+
+<!-- Load our util (shared with worker) -->
+<script src="util.js"> </script>
 
 </head>
 
@@ -54,6 +58,10 @@
 
 <script>
 
+  if (!window.Worker) {
+    alert("This browser is not supported.  Share X ray photos with a computer that has a modern browser");
+  }
+
   function status(message) {
     console.log(message);
     document.getElementById('cxrStatus').innerText = message;
@@ -63,36 +71,12 @@
   //const modelName = "modeltest-003-0.894167-0.769167.tfjs";
   const modelName = "modeltest-003-0.886000-0.806667.tfjs";
   const modelURL = `https://storage.googleapis.com/cxr-models/${modelName}/model.json`;
+  let model;
 
   status('Downloading predictive model');
   const modelLoadPromise = tf.loadLayersModel(modelURL, {
     onProgress: (fraction) => {status(`${(fraction * 100).toFixed(1)}% loaded...`);},
   });
-
-  const imageElement = document.getElementById('cxrImage');
-  const imageCanvas = document.getElementById('cxrCanvas');
-  let imageMatrix;
-  const imageLogoSource = imageElement.src;
-  const dropzoneElement = document.getElementById('cxrDropzone');
-  let model;
-  let predicting = false;
-  const filesToProcess = [];
-  const filesProcessed = [];
-
-  function checkAcceptedFiles(file) {
-    file = file || {name: "unspecified"};
-    console.log("error triggered", file.name);
-    dropzone.getAcceptedFiles().forEach(file => {
-      console.log(`checking ${file.name}`);
-      if (file.dataURL
-            && filesToProcess.indexOf(file) == -1) {
-        status(`adding ${file.name}`);
-        filesToProcess.unshift(file);
-      }
-    });
-    console.log('trigger predict', filesToProcess)
-    triggerPrediction();
-  }
 
   modelLoadPromise
   .then(loadedModel => {
@@ -101,8 +85,46 @@
     triggerPrediction()
   });
 
+  const imageElement = document.getElementById('cxrImage');
+  const imageCanvas = document.getElementById('cxrCanvas');
+  let imageMatrix;
+  const imageLogoSource = imageElement.src;
+  const dropzoneElement = document.getElementById('cxrDropzone');
+  let predicting = false;
+  const filesToProcess = [];
+  const filesProcessed = [];
+
+  function checkAcceptedFiles(file) {
+    file = file || {name: "unspecified"};
+    dropzone.getAcceptedFiles().forEach(file => {
+      if (file.dataURL
+            && filesToProcess.indexOf(file) == -1) {
+        status(`adding ${file.name}`);
+        filesToProcess.unshift(file);
+      }
+    });
+    triggerPrediction();
+  }
+
+  function equalizeImageToCanvas() {
+    // uses global element and canvas
+    return new Promise((resolve, reject) => {
+      imageMatrix = cv.imread(imageElement); // TODO: normalize in cv
+      const message = cvImageToMessageData(imageMatrix);
+      imageMatrix.delete();
+      message.request = "equalize";
+      const worker = new Worker("worker.js");
+      worker.addEventListener("message", (message) => {
+        imageMatrix = messageDataToCvImage(message.data);
+        cv.imshow('cxrCanvas', imageMatrix);
+        imageMatrix.delete();
+        resolve();
+      });
+      worker.postMessage(message);
+    });
+  }
+
   function triggerPrediction() {
-    console.log('triggered for ', filesToProcess);
     if (predicting 
           || filesToProcess.length == 0
           || !model
@@ -114,46 +136,36 @@
     }
     predicting = true;
     const file = filesToProcess.pop();
-    status(`Predicting ${file.name}...`);
     setTimeout(() => {
       imageElement.src = file.dataURL;
       imageElement.onload = function() {
         dropzone.removeFile(file);
-        // OpenCV
-console.time('opencv');
-        imageMatrix = cv.imread(imageElement); // TODO: normalize in cv
-        cv.cvtColor(imageMatrix, imageMatrix, cv.COLOR_RGB2GRAY,0 )
-        let tileGridSize = new cv.Size(imageElement.height / 8, imageElement.width / 8);
-        const clahe = new cv.CLAHE(40, tileGridSize);
-        clahe.setClipLimit(0.01 * 255);
-        clahe.apply(imageMatrix, imageMatrix);
-        cv.medianBlur(imageMatrix, imageMatrix, 5);
-        cv.imshow('cxrCanvas', imageMatrix);
-        imageMatrix.delete();
-console.timeEnd('opencv');
-        // tensorflow
-console.time('tensorflow');
-        const tensor = tf.browser.fromPixels(imageCanvas).div(255);
-        const reshapedTensor = tensor.reshape([-1, imageElement.height, imageElement.width, 3]);
-        predictionTensor = model.predict(reshapedTensor, {verbose: true})
-        predictionTensor.data()
-        .then(data => {
-console.timeEnd('tensorflow');
-          const results = document.getElementById('cxrResults')
-          const header = document.createElement("h3");
-          results.appendChild(header);
-          header.innerText = `Results for: ${file.name}`;
-          const reportThumbndail = document.createElement("img");
-          results.appendChild(reportThumbndail);
-          reportThumbndail.src = file.dataURL;
-          reportThumbndail.width = 200
-          const result = document.createElement("p");
-          result.innerText = `${(100 * data[1]).toFixed(2)}% probability of being a good chest X ray image`;
-          results.appendChild(result);
-          predicting = false
-          filesProcessed.unshift(file);
-          status(`Finished predicting ${file.name}.`);
-          checkAcceptedFiles();
+        status(`Equalizing ${file.name}...`);
+        equalizeImageToCanvas()
+        .then(() => {
+          // tensorflow
+          status(`Predicting ${file.name}...`);
+          const tensor = tf.browser.fromPixels(imageCanvas).div(255);
+          const reshapedTensor = tensor.reshape([-1, imageElement.height, imageElement.width, 3]);
+          predictionTensor = model.predict(reshapedTensor, {verbose: true})
+          predictionTensor.data()
+          .then(data => {
+            const results = document.getElementById('cxrResults')
+            const header = document.createElement("h3");
+            results.appendChild(header);
+            header.innerText = `Results for: ${file.name}`;
+            const reportThumbndail = document.createElement("img");
+            results.appendChild(reportThumbndail);
+            reportThumbndail.src = file.dataURL;
+            reportThumbndail.width = 200
+            const result = document.createElement("p");
+            result.innerText = `${(100 * data[1]).toFixed(2)}% probability of being a good chest X ray image`;
+            results.appendChild(result);
+            predicting = false
+            filesProcessed.unshift(file);
+            status(`Finished predicting`);
+            checkAcceptedFiles();
+          });
         });
       }
     }, 5);
@@ -170,7 +182,6 @@ console.timeEnd('tensorflow');
     parallelUploads: 1,
   });
   dropzone.on("error", checkAcceptedFiles);
-
 })();
 </script>
 
