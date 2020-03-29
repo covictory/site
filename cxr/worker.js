@@ -14,14 +14,12 @@ function equalize(cvImage) {
 }
 
 self.addEventListener("message", (message) => {
-  console.log("WORKER SEZ", message.data);
 
   if (message.data.request == "equalize") {
     const cvImage = messageDataToCvImage(message.data);
     equalize(cvImage);
     messageData = cvImageToMessageData(cvImage);
     self.postMessage(messageData);
-    console.log('WORKER message', messageData.rows);
     cvImage.delete()
   }
 

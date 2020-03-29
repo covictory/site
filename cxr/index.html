@@ -21,6 +21,7 @@
 
 <!-- Load thirdparty -->
 <script src="thirdparty/dropzone.min.js"> </script>
+<script src="thirdparty/base64-binary.js"> </script>
 <link rel="stylesheet" href="thirdparty/dropzone.min.css"/>
 
 
@@ -90,7 +91,7 @@
   let imageMatrix;
   const imageLogoSource = imageElement.src;
   const dropzoneElement = document.getElementById('cxrDropzone');
-  let predicting = false;
+  let predictingFile = undefined;
   const filesToProcess = [];
   const filesProcessed = [];
 
@@ -106,6 +107,19 @@
     triggerPrediction();
   }
 
+  function predictFromBase64Image(name, rows, columns, imageString) {
+    imageArray = Base64Binary.decode(imageString);
+    imageMatrix = cv.matFromArray(rows, columns, cv.CV_8UC3, imageArray);
+    cv.imshow('cxrCanvas', imageMatrix);
+    imageElement.src = imageCanvas.toDataURL("image/png");
+    predictingFile = {
+      name: name,
+      dataURL: imageElement.src,
+    }
+    equalizeImageToCanvas()
+    .then(predictResultFromCanvas);
+  }
+
   function equalizeImageToCanvas() {
     // uses global element and canvas
     return new Promise((resolve, reject) => {
@@ -118,55 +132,57 @@
         imageMatrix = messageDataToCvImage(message.data);
         cv.imshow('cxrCanvas', imageMatrix);
         imageMatrix.delete();
+        worker.terminate();
         resolve();
       });
       worker.postMessage(message);
     });
   }
 
+  function predictResultFromCanvas() {
+    status(`Predicting ${predictingFile.name}...`);
+    const tensor = tf.browser.fromPixels(imageCanvas).div(255);
+    const reshapedTensor = tensor.reshape([-1, imageElement.height, imageElement.width, 3]);
+    predictionTensor = model.predict(reshapedTensor, {verbose: true})
+    predictionTensor.data()
+    .then(data => {
+      const results = document.getElementById('cxrResults')
+      const header = document.createElement("h3");
+      results.appendChild(header);
+      header.innerText = `Results for: ${predictingFile.name}`;
+      const reportThumbndail = document.createElement("img");
+      results.appendChild(reportThumbndail);
+      reportThumbndail.src = predictingFile.dataURL;
+      reportThumbndail.width = 200
+      const result = document.createElement("p");
+      result.innerText = `${(100 * data[1]).toFixed(2)}% probability of being a good chest X ray image`;
+      results.appendChild(result);
+      predictingFile = undefined;
+      filesProcessed.unshift(predictingFile);
+      status(`Finished predicting`);
+      checkAcceptedFiles();
+    });
+  }
+
   function triggerPrediction() {
-    if (predicting 
+    if (predictingFile
           || filesToProcess.length == 0
           || !model
       ) {
       console.log('triggered, but nothing to predict');
-      console.log('predicting', predicting);
+      console.log('predicting', predictingFile);
       console.log('filesToProcess', filesToProcess);
       return;
     }
-    predicting = true;
     const file = filesToProcess.pop();
+    predictingFile = file;
     setTimeout(() => {
-      imageElement.src = file.dataURL;
+      imageElement.src = predictingFile.dataURL;
       imageElement.onload = function() {
-        dropzone.removeFile(file);
-        status(`Equalizing ${file.name}...`);
+        dropzone.removeFile(predictingFile);
+        status(`Equalizing ${predictingFile.name}...`);
         equalizeImageToCanvas()
-        .then(() => {
-          // tensorflow
-          status(`Predicting ${file.name}...`);
-          const tensor = tf.browser.fromPixels(imageCanvas).div(255);
-          const reshapedTensor = tensor.reshape([-1, imageElement.height, imageElement.width, 3]);
-          predictionTensor = model.predict(reshapedTensor, {verbose: true})
-          predictionTensor.data()
-          .then(data => {
-            const results = document.getElementById('cxrResults')
-            const header = document.createElement("h3");
-            results.appendChild(header);
-            header.innerText = `Results for: ${file.name}`;
-            const reportThumbndail = document.createElement("img");
-            results.appendChild(reportThumbndail);
-            reportThumbndail.src = file.dataURL;
-            reportThumbndail.width = 200
-            const result = document.createElement("p");
-            result.innerText = `${(100 * data[1]).toFixed(2)}% probability of being a good chest X ray image`;
-            results.appendChild(result);
-            predicting = false
-            filesProcessed.unshift(file);
-            status(`Finished predicting`);
-            checkAcceptedFiles();
-          });
-        });
+        .then(predictResultFromCanvas);
       }
     }, 5);
   }
