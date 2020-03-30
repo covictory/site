@@ -75,19 +75,26 @@
   let modelURL = `https://storage.googleapis.com/cxr-models/${modelName}/model.json`;
   let model;
 
-  const imageElement = document.getElementById('cxrImage');
-  const imageCanvas = document.getElementById('cxrCanvas');
-  let imageMatrix;
-  const imageLogoSource = imageElement.src;
-  const dropzoneElement = document.getElementById('cxrDropzone');
-  let predictingFile = undefined;
-  const filesToProcess = [];
-  const filesProcessed = [];
-  let offerDownload = false;
+  const cxr = {
+    imageElement : document.getElementById('cxrImage'),
+    imageCanvas : document.getElementById('cxrCanvas'),
+    imageMatrix : undefined,
+    dropzoneElement : document.getElementById('cxrDropzone'),
+    state : {
+      predictingFile : undefined,
+      filesToProcess : [],
+      filesProcessed : [],
+    },
+    options : {
+      offerDownload : false,
+    },
+  };
 
   const url = new URL(document.location.href);
   const searchParams = new URLSearchParams(url.search);
   if (searchParams.has("imageURL")) {
+    // for example:
+    // http://127.0.0.1:8080/?imageURL=https://storage.googleapis.com/cxr-data/chest-xray/test/PNEUMONIA/person100_bacteria_475.jpeg&offerDownload=true
     const imageURL = new URL(searchParams.get("imageURL"));
     const pathParts = imageURL.pathname.split("/")
     const name = pathParts[pathParts.length-1];
@@ -98,7 +105,7 @@
   }
   if (searchParams.has("offerDownload")) {
     if (searchParams.get("offerDownload") == "true") {
-      offerDownload = true;
+      cxr.options.offerDownload = true;
     }
   }
 
@@ -125,9 +132,9 @@
     file = file || {name: "unspecified"};
     dropzone.getAcceptedFiles().forEach(file => {
       if (file.dataURL
-            && filesToProcess.indexOf(file) == -1) {
+            && cxr.state.filesToProcess.indexOf(file) == -1) {
         status(`adding ${file.name}`);
-        filesToProcess.unshift(file);
+        cxr.state.filesToProcess.unshift(file);
       }
     });
     triggerPrediction();
@@ -135,33 +142,36 @@
 
   function predictFromBase64Image(name, rows, columns, imageString) {
     imageArray = Base64Binary.decode(imageString);
-    imageMatrix = cv.matFromArray(rows, columns, cv.CV_8UC3, imageArray);
-    cv.imshow('cxrCanvas', imageMatrix);
-    predictFromImageSource(name, imageCanvas.toDataURL("image/png"));
+    cxr.imageMatrix = cv.matFromArray(rows, columns, cv.CV_8UC3, imageArray);
+    cv.imshow('cxrCanvas', cxr.imageMatrix);
+    predictFromImageSource(name, cxr.imageCanvas.toDataURL("image/png"));
   }
 
   function predictFromImageSource(name, imageSource) {
-    imageElement.src = imageSource;
-    predictingFile = {
+    cxr.imageElement.src = imageSource;
+    cxr.state.predictingFile = {
       name: name,
-      dataURL: imageElement.src,
+      dataURL: cxr.imageElement.src,
     }
-    equalizeImageToCanvas()
-    .then(predictResultFromCanvas);
+    cxr.imageElement.onload = function () {
+      equalizeImageToCanvas()
+      .then(predictResultFromCanvas);
+    }
   }
 
   function equalizeImageToCanvas() {
     // uses global element and canvas
     return new Promise((resolve, reject) => {
-      imageMatrix = cv.imread(imageElement); // TODO: normalize in cv
-      const message = cvImageToMessageData(imageMatrix);
-      imageMatrix.delete();
+      cxr.imageMatrix = cv.imread(cxr.imageElement); // TODO: normalize in cv
+console.log(cv.mean(cxr.imageMatrix));
+      const message = cvImageToMessageData(cxr.imageMatrix);
+      cxr.imageMatrix.delete();
       message.request = "equalize";
       const worker = new Worker("worker.js");
       worker.addEventListener("message", (message) => {
-        imageMatrix = messageDataToCvImage(message.data);
-        cv.imshow('cxrCanvas', imageMatrix);
-        imageMatrix.delete();
+        cxr.imageMatrix = messageDataToCvImage(message.data);
+        cv.imshow('cxrCanvas', cxr.imageMatrix);
+        cxr.imageMatrix.delete();
         worker.terminate();
         resolve();
       });
@@ -170,21 +180,20 @@
   }
 
   function predictResultFromCanvas() {
-    status(`Predicting ${predictingFile.name}...`);
-    const tensor = tf.browser.fromPixels(imageCanvas).div(255);
-    const reshapedTensor = tensor.reshape([-1, imageElement.height, imageElement.width, 3]);
+    status(`Predicting ${cxr.state.predictingFile.name}...`);
+    const tensor = tf.browser.fromPixels(cxr.imageCanvas).div(255);
+    const reshapedTensor = tensor.reshape([-1, cxr.imageElement.height, cxr.imageElement.width, 3]);
     predictionTensor = model.predict(reshapedTensor, {verbose: true})
     predictionTensor.data()
     .then(data => {
       finalizePrediction({
-        name : predictingFile.name,
-        headerText : `Results for: ${predictingFile.name}`,
-        thumbnailSoure : predictingFile.dataURL,
+        name : cxr.state.predictingFile.name,
+        headerText : `Results for: ${cxr.state.predictingFile.name}`,
+        thumbnailSoure : cxr.state.predictingFile.dataURL,
         probability : data[1],
       });
-      filesProcessed.unshift(predictingFile);
-      filesProcessed.unshift(predictingFile);
-      predictingFile = undefined;
+      cxr.state.filesProcessed.unshift(cxr.state.predictingFile);
+      cxr.state.predictingFile = undefined;
       status(`Finished predicting`);
       checkAcceptedFiles();
     });
@@ -205,12 +214,12 @@
     reportThumbndail.src = prediction.thumbnailSoure;
     result.innerText = `${(100 * prediction.probability).toFixed(2)}% probability of being a good chest X ray image`;
 
-    if (offerDownload) {
+    if (cxr.options.offerDownload) {
       const resultObject = {
         name: prediction.name,
         probability: prediction.probability,
       };
-      imageCanvas.toBlob(pngBlob => {
+      cxr.imageCanvas.toBlob(pngBlob => {
         const resultBlob = new Blob([JSON.stringify(resultObject, null, 2)], {type: 'application/json'});
         let zip = new JSZip();
         zip.file(`${prediction.name}-result.json`, resultBlob);
@@ -225,22 +234,22 @@
   }
 
   function triggerPrediction() {
-    if (predictingFile
-          || filesToProcess.length == 0
+    if (cxr.state.predictingFile
+          || cxr.state.filesToProcess.length == 0
           || !model
       ) {
       console.log('triggered, but nothing to predict');
-      console.log('predicting', predictingFile);
-      console.log('filesToProcess', filesToProcess);
+      console.log('predicting', cxr.state.predictingFile);
+      console.log('cxr.state.filesToProcess', cxr.state.filesToProcess);
       return;
     }
-    const file = filesToProcess.pop();
-    predictingFile = file;
+    const file = cxr.state.filesToProcess.pop();
+    cxr.state.predictingFile = file;
     setTimeout(() => {
-      imageElement.src = predictingFile.dataURL;
-      imageElement.onload = function() {
-        dropzone.removeFile(predictingFile);
-        status(`Equalizing ${predictingFile.name}...`);
+      cxr.imageElement.src = cxr.state.predictingFile.dataURL;
+      cxr.imageElement.onload = function() {
+        dropzone.removeFile(cxr.state.predictingFile);
+        status(`Equalizing ${cxr.state.predictingFile.name}...`);
         equalizeImageToCanvas()
         .then(predictResultFromCanvas);
       }
@@ -260,7 +269,7 @@
 //
 (function() {
   Dropzone.autoDiscover = false;
-  dropzone = new Dropzone(dropzoneElement, {
+  dropzone = new Dropzone(cxr.dropzoneElement, {
     autoProcessQueue: true,
     parallelUploads: 1,
   });
