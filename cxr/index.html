@@ -20,8 +20,10 @@
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.7.0"> </script>
 
 <!-- Load thirdparty -->
-<script src="thirdparty/dropzone.min.js"> </script>
 <script src="thirdparty/base64-binary.js"> </script>
+<script src="thirdparty/dropzone.min.js"> </script>
+<script src="thirdparty/FileSaver-v2.0.2.min.js"> </script>
+<script src="thirdparty/jszip.min.js"> </script>
 <link rel="stylesheet" href="thirdparty/dropzone.min.css"/>
 
 
@@ -59,21 +61,50 @@
 
 <script>
 
-  if (!window.Worker) {
+  if (!window.Worker ||
+      !window.tf ) {
     alert("This browser is not supported.  Share X ray photos with a computer that has a modern browser");
   }
 
-  function status(message) {
-    console.log(message);
-    document.getElementById('cxrStatus').innerText = message;
-  }
-
+  //
+  // args and globals
+  //
   //const modelName = "CheXNet_acil-tfjs";
   //const modelName = "modeltest-003-0.894167-0.769167.tfjs";
-  const modelName = "modeltest-003-0.886000-0.806667.tfjs";
-  const modelURL = `https://storage.googleapis.com/cxr-models/${modelName}/model.json`;
+  let modelName = "modeltest-003-0.886000-0.806667.tfjs";
+  let modelURL = `https://storage.googleapis.com/cxr-models/${modelName}/model.json`;
   let model;
 
+  const imageElement = document.getElementById('cxrImage');
+  const imageCanvas = document.getElementById('cxrCanvas');
+  let imageMatrix;
+  const imageLogoSource = imageElement.src;
+  const dropzoneElement = document.getElementById('cxrDropzone');
+  let predictingFile = undefined;
+  const filesToProcess = [];
+  const filesProcessed = [];
+  let offerDownload = false;
+
+  const url = new URL(document.location.href);
+  const searchParams = new URLSearchParams(url.search);
+  if (searchParams.has("imageURL")) {
+    const imageURL = new URL(searchParams.get("imageURL"));
+    const pathParts = imageURL.pathname.split("/")
+    const name = pathParts[pathParts.length-1];
+    predictFromImageSource(name, searchParams.get("imageURL"));
+  }
+  if (searchParams.has("modelURL")) {
+    modelURL = searchParams.get("modelURL");
+  }
+  if (searchParams.has("offerDownload")) {
+    if (searchParams.get("offerDownload") == "true") {
+      offerDownload = true;
+    }
+  }
+
+  //
+  // model
+  //
   status('Downloading predictive model');
   const modelLoadPromise = tf.loadLayersModel(modelURL, {
     onProgress: (fraction) => {status(`${(fraction * 100).toFixed(1)}% loaded...`);},
@@ -86,15 +117,10 @@
     triggerPrediction()
   });
 
-  const imageElement = document.getElementById('cxrImage');
-  const imageCanvas = document.getElementById('cxrCanvas');
-  let imageMatrix;
-  const imageLogoSource = imageElement.src;
-  const dropzoneElement = document.getElementById('cxrDropzone');
-  let predictingFile = undefined;
-  const filesToProcess = [];
-  const filesProcessed = [];
 
+  //
+  // file processing and prediction
+  //
   function checkAcceptedFiles(file) {
     file = file || {name: "unspecified"};
     dropzone.getAcceptedFiles().forEach(file => {
@@ -111,7 +137,11 @@
     imageArray = Base64Binary.decode(imageString);
     imageMatrix = cv.matFromArray(rows, columns, cv.CV_8UC3, imageArray);
     cv.imshow('cxrCanvas', imageMatrix);
-    imageElement.src = imageCanvas.toDataURL("image/png");
+    predictFromImageSource(name, imageCanvas.toDataURL("image/png"));
+  }
+
+  function predictFromImageSource(name, imageSource) {
+    imageElement.src = imageSource;
     predictingFile = {
       name: name,
       dataURL: imageElement.src,
@@ -146,22 +176,52 @@
     predictionTensor = model.predict(reshapedTensor, {verbose: true})
     predictionTensor.data()
     .then(data => {
-      const results = document.getElementById('cxrResults')
-      const header = document.createElement("h3");
-      results.appendChild(header);
-      header.innerText = `Results for: ${predictingFile.name}`;
-      const reportThumbndail = document.createElement("img");
-      results.appendChild(reportThumbndail);
-      reportThumbndail.src = predictingFile.dataURL;
-      reportThumbndail.width = 200
-      const result = document.createElement("p");
-      result.innerText = `${(100 * data[1]).toFixed(2)}% probability of being a good chest X ray image`;
-      results.appendChild(result);
-      predictingFile = undefined;
+      finalizePrediction({
+        name : predictingFile.name,
+        headerText : `Results for: ${predictingFile.name}`,
+        thumbnailSoure : predictingFile.dataURL,
+        probability : data[1],
+      });
       filesProcessed.unshift(predictingFile);
+      filesProcessed.unshift(predictingFile);
+      predictingFile = undefined;
       status(`Finished predicting`);
       checkAcceptedFiles();
     });
+  }
+
+  function finalizePrediction(prediction) {
+    // create document structure
+    const results = document.getElementById('cxrResults')
+    const header = document.createElement("h3");
+    results.appendChild(header);
+    const reportThumbndail = document.createElement("img");
+    results.appendChild(reportThumbndail);
+    reportThumbndail.width = 200
+    const result = document.createElement("p");
+    results.appendChild(result);
+    // fill in values
+    header.innerText = prediction.headerText;
+    reportThumbndail.src = prediction.thumbnailSoure;
+    result.innerText = `${(100 * prediction.probability).toFixed(2)}% probability of being a good chest X ray image`;
+
+    if (offerDownload) {
+      const resultObject = {
+        name: prediction.name,
+        probability: prediction.probability,
+      };
+      imageCanvas.toBlob(pngBlob => {
+        const resultBlob = new Blob([JSON.stringify(resultObject, null, 2)], {type: 'application/json'});
+        let zip = new JSZip();
+        zip.file(`${prediction.name}-result.json`, resultBlob);
+        zip.file(`${prediction.name}-equalized.png`, pngBlob);
+        zip.generateAsync({type: "blob"})
+        .then(contents => {
+          console.log(contents);
+          saveAs(contents, `${prediction.name}-result.zip`);
+        });
+      }, 'image/png');
+    }
   }
 
   function triggerPrediction() {
@@ -187,10 +247,17 @@
     }, 5);
   }
 
+  function status(message) {
+    console.log(message);
+    document.getElementById('cxrStatus').innerText = message;
+  }
+
 </script>
 
 <script>
+//
 // code that needs to execute after document body is loaded
+//
 (function() {
   Dropzone.autoDiscover = false;
   dropzone = new Dropzone(dropzoneElement, {
