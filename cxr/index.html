@@ -173,26 +173,40 @@ console.log(cv.mean(cxr.imageMatrix));
       worker.addEventListener("message", (message) => {
         cxr.imageMatrix = messageDataToCvImage(message.data);
         cv.imshow('cxrCanvas', cxr.imageMatrix);
-        cxr.imageMatrix.delete();
+
+        //cxr.imageMatrix.delete(); TODO: delete this
+
         worker.terminate();
-        resolve();
+        message.data.cvImage = cxr.imageMatrix;
+        resolve(message.data);
       });
       worker.postMessage(message);
     });
   }
 
-  function predictResultFromCanvas() {
+  function predictResultFromCanvas(result) {
     status(`Predicting ${cxr.state.predictingFile.name}...`);
-    const tensor = tf.browser.fromPixels(cxr.imageCanvas).div(255);
-    const reshapedTensor = tensor.reshape([-1, cxr.imageElement.height, cxr.imageElement.width, 3]);
-    predictionTensor = model.predict(reshapedTensor, {verbose: true})
+    //const tensor = tf.browser.fromPixels(cxr.imageCanvas).div(255);
+    //const reshapedTensor = tensor.reshape([-1, cxr.imageElement.height, cxr.imageElement.width, 3]);
+    console.log(result);
+    const range = result.result.upper - result.result.lower;
+    const shape = [1, cxr.imageElement.height, cxr.imageElement.width, 3];
+    const imageTensor = tf.buffer(shape, "float32", result.cvImage.data32F).toTensor();
+    cxr.imageTensorPre = imageTensor;
+    imageTensor.sub(result.result.lower).mul(1./range).clipByValue(0, 1);
+    cxr.imageTensorPost = imageTensor;
+    predictionTensor = model.predict(imageTensor, {verbose: true})
     predictionTensor.data()
     .then(data => {
       finalizePrediction({
         name : cxr.state.predictingFile.name,
         headerText : `Results for: ${cxr.state.predictingFile.name}`,
         thumbnailSoure : cxr.state.predictingFile.dataURL,
-        probability : data[1],
+        probabilities : {
+          normal : data[0],
+          mild : data[1],
+          moderateSevere : data[2],
+        }
       });
       cxr.state.filesProcessed.unshift(cxr.state.predictingFile);
       cxr.state.predictingFile = undefined;
@@ -207,19 +221,49 @@ console.log(cv.mean(cxr.imageMatrix));
     const header = document.createElement("h3");
     results.appendChild(header);
     const reportThumbndail = document.createElement("img");
-    results.appendChild(reportThumbndail);
     reportThumbndail.width = 200
-    const result = document.createElement("p");
-    results.appendChild(result);
+    results.appendChild(reportThumbndail);
+    const reportGlyph = document.createElement("div");
+    results.appendChild(reportGlyph);
+    const resultTable = document.createElement("div");
+    resultTable.setAttribute("class", "cxrResultTable");
+    rows = {};
+    Object.keys(prediction.probabilities).forEach( row => {
+      rows[row] = document.createElement("p");
+      resultTable.appendChild(rows[row]);
+    });
+    results.appendChild(resultTable);
     // fill in values
     header.innerText = prediction.headerText;
     reportThumbndail.src = prediction.thumbnailSoure;
-    result.innerText = `${(100 * prediction.probability).toFixed(2)}% probability of being a good chest X ray image`;
+    const keyMap = {
+      normal : "normal",
+      mild : "mild",
+      moderateSevere : "moderate or severe",
+    }
+    Object.keys(prediction.probabilities).forEach( row => {
+      rows[row].innerText = `${(100 * prediction.probabilities[row]).toFixed(2)}% probability of being ${keyMap[row]}`;
+    });
+    const greenWidth = 100*prediction.probabilities['normal'];
+    const yellowWidth = 100*prediction.probabilities['mild'];
+    const redWidth = 100*prediction.probabilities['moderateSevere'];
+    reportGlyph.outerHTML += `
+      <svg width="${reportThumbndail.width}" height="60" xmlns="http://www.w3.org/2000/svg">
+        <rect x="0" y="0" width="100%" height="100%" fill = "black"></rect>
+        <g transform="translate(100 30)">
+        <g transform="scale(.9 .83)">
+        <g transform="translate(-100 -30)">
+          <rect x="0" y="0" width="${greenWidth}%" height="100%" fill="green"></rect>
+          <rect x="${greenWidth}%" y="0" width="${yellowWidth}%" height="100%" fill="yellow"></rect>
+          <rect x="${greenWidth + yellowWidth}%" y="0" width="${redWidth}%" height="100%" fill="red"></rect>
+        </g> </g> </g>
+      </svg>
+    `;
 
     if (cxr.options.offerDownload) {
       const resultObject = {
         name: prediction.name,
-        probability: prediction.probability,
+        probabilities: prediction.probabilities,
       };
       cxr.imageCanvas.toBlob(pngBlob => {
         const resultBlob = new Blob([JSON.stringify(resultObject, null, 2)], {type: 'application/json'});

@@ -3,7 +3,7 @@ importScripts(
   "util.js"
 );
 
-function cv_percentile(cvImage) {
+function cv_percentile(cvImage, percentileLimits) {
   // from https://stackoverflow.com/questions/51063944/mapping-pixels-elements-to-percentiles-c-opencv
   // https://docs.opencv.org/master/d7/d32/tutorial_js_histogram_begins.html
   // to match https://docs.scipy.org/doc/numpy/reference/generated/numpy.percentile.html
@@ -13,84 +13,98 @@ function cv_percentile(cvImage) {
   const accumulate = false;
   const channels = [0];
   const histSize = [256];
-  const ranges = [0, 255];
+  const ranges = [0, 1];
   const hist = new cv.Mat();
   const mask = new cv.Mat();
 
   cv.calcHist(sources, channels, mask, hist, histSize, ranges, accumulate);
 
-  result = cv.minMaxLoc(hist, mask);
+  const bins = []
+  const totalPixels = cvImage.cols * cvImage.rows;
+  let fraction = 0;
   for (let i = 0; i < histSize[0]; i++) {
-    console.log( i, hist.data32F[i] );
+    fraction = hist.data32F[i] / totalPixels;
+    bins.push({value : i / histSize[0], fraction : fraction});
   }
+  bins.sort((a,b) => {
+    return (a.fraction - b.fraction);
+  });
 
-
-  /*
-
-  const range = [0, 255];
-  const uniform = true;
-
-    cv::Mat hist;
-    int histSize = 256;
-    float range[] = { 0, 256 } ;
-    const float* histRange = { range };
-    bool uniform = true; bool accumulate = false;
-    cv::calcHist( &gray, 1, 0, cv::Mat(), hist, 1, &histSize, &histRange, uniform, accumulate );
-
-    // total pixels in image
-    float totalPixels = gray.cols * gray.rows;
-
-    // calculate percentage of every histogram bin (i.e: pixel value [0 - 255])
-    // the 'bins' variable holds pairs of (int pixelValue, float percentage)
-    std::vector<std::pair<int, float>> bins;
-    float percentage;
-    for(int i = 0; i < 256; ++i)
-    {
-        percentage = (hist.at<float>(i,0)*100.0)/totalPixels;
-        bins.push_back(std::make_pair(i, percentage));
+  let [lowerPercentile, upperPercentile] = percentileLimits
+  let lowerValue, upperValue;
+  cumulativeFraction = 0;
+  bins.forEach(bin => {
+    if ( !lowerValue && cumulativeFraction > lowerPercentile ) {
+      lowerValue = bin.value;
     }
-
-    // sort the bins according to percentage
-    sort(bins.begin(), bins.end(),comparator());
-
-    // compute percentile for a pixel value
-    int pixel = 185;
-    float sum = 0;
-
-    for (auto b : bins)
-    {
-        if(b.first != pixel)
-            sum += b.second;
-        else
-        {
-            sum += b.second/2;
-            break;
-        }
+    if ( !upperValue && cumulativeFraction > upperPercentile ) {
+      upperValue = bin.value;
     }
-    */
+    cumulativeFraction += bin.fraction;
+  });
+  upperValue = upperValue || 1.;
+  console.log(cumulativeFraction);
+  console.log(lowerValue, upperValue);
+  return( {lower: lowerValue, upper: upperValue, } );
 }
 
 function equalize(cvImage) {
-  cv.cvtColor(cvImage, cvImage, cv.COLOR_RGB2GRAY,0 )
-  cv_percentile(cvImage);
-  let tileGridSize = new cv.Size(cvImage.rows / 8, cvImage.cols / 8);
-  const clahe = new cv.CLAHE(40, tileGridSize);
-  clahe.setClipLimit(0.01 * 255);
+  // TODO: delete cv objects
+  // cvImage in is 0-255, RGBA
+  // cvImage out is 0-1, on channel
+  let scale;
+  let bias;
+
+  // make one component grayscale
+  cv.cvtColor(cvImage, cvImage, cv.COLOR_RGB2GRAY, 1)
+  const rgbaPlanes = new cv.MatVector();
+  cv.split(cvImage, rgbaPlanes);
+  rgbaPlanes.get(0).copyTo(cvImage);
+
+  console.log('channels', cvImage.channels());
+
+  let minMax = cv.minMaxLoc(cvImage);
+
+  [scale, bias] = [2**16 / minMax.maxVal, 0];
+  console.log(scale, bias);
+  cvImage.convertTo(cvImage, cv.CV_16UC1, scale, bias);
+
+  console.log('mean is', cv.mean(cvImage));
+  console.log('channels', cvImage.channels());
+
+  /*
+   * TODO
+  // contrast limited adaptive histogram equalization
+  const tileGridSize = new cv.Size(cvImage.rows / 4, cvImage.cols / 4);
+  const clahe = new cv.CLAHE(0.01 * 2**16, tileGridSize);
   clahe.apply(cvImage, cvImage);
-  cv.medianBlur(cvImage, cvImage, 5);
-  let range = cv_percentile(cvImage);
-  // TODO clip
+  */
+
+  // normalize to 0-1
+  [scale, bias] = [1./2**16, 0];
+  cvImage.convertTo(cvImage, cv.CV_32F, scale, bias);
+  console.log(cv.mean(cvImage));
+
+  // denoise
+  cv.medianBlur(cvImage, cvImage, 3);
+
+  // find where the bulk of the image intensities lie
+  const percentileLimits = [0.02, 0.98];
+  result = cv_percentile(cvImage, percentileLimits);
+
+  cv.cvtColor(cvImage, cvImage, cv.COLOR_GRAY2RGB, 3);
+
+  return(result);
 }
 
 
 self.addEventListener("message", (message) => {
-
   if (message.data.request == "equalize") {
     const cvImage = messageDataToCvImage(message.data);
-    equalize(cvImage);
+    result = equalize(cvImage);
     messageData = cvImageToMessageData(cvImage);
+    messageData.result = result;
     self.postMessage(messageData);
     cvImage.delete()
   }
-
 });
