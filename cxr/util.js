@@ -1,5 +1,5 @@
 function cvImageToMessageData(cvImage) {
-  console.log("from Mat", cvImage.cols, cvImage.rows, cvImage.type(), cvImage.data);
+  console.log("from Mat", cvImage.cols, cvImage.rows, cvImage.channels(), cvImage.type(), cvImage.data);
   if (cvImage.type() & cv.CV_32F) {
     data = cvImage.data32F;
   } else {
