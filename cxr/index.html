@@ -13,22 +13,16 @@
 
 <link rel="stylesheet" href="site.css" />
 
-<!-- Load opencv.js -->
-<script src="thirdparty/opencv.js"> </script>
-
 <!-- Load TensorFlow.js -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.7.0"> </script>
 
 <!-- Load thirdparty -->
+<script src="thirdparty/FileSaver-v2.0.2.min.js"> </script>
 <script src="thirdparty/base64-binary.js"> </script>
 <script src="thirdparty/dropzone.min.js"> </script>
-<script src="thirdparty/FileSaver-v2.0.2.min.js"> </script>
 <script src="thirdparty/jszip.min.js"> </script>
+<script src="thirdparty/magick.js"> </script>
 <link rel="stylesheet" href="thirdparty/dropzone.min.css"/>
-
-
-<!-- Load our util (shared with worker) -->
-<script src="util.js"> </script>
 
 </head>
 
@@ -46,7 +40,7 @@
 <form action="/file-upload"
       class="dropzone"
       id="cxrDropzone">
-  <p class="dz-message">Drop chest X-ray image here, or click to upload</p>
+  <p class="dz-message">Drop chest X-ray image here, or click to upload (dcm, png, jpg...)</p>
 </form>
 
 <div id="cxrResults"></div>
@@ -75,6 +69,7 @@
   let modelName = "model-009-0.922879-0.799286.tfjs"
   let modelURL = `https://storage.googleapis.com/cxr-models/${modelName}/model.json`;
   let model;
+  let magick;
 
   const cxr = {
     imageElement : document.getElementById('cxrImage'),
@@ -126,15 +121,22 @@
     triggerPrediction()
   });
 
+  //
+  // magick
+  //
+  function onMagickDependenciesFullfilled() {
+    console.log("Magick is ready");
+    magick = Module;
+    triggerPrediction();
+  }
 
   //
   // file processing and prediction
   //
   function checkAcceptedFiles(file) {
     file = file || {name: "unspecified"};
-    dropzone.getAcceptedFiles().forEach(file => {
-      if (file.dataURL
-            && cxr.state.filesToProcess.indexOf(file) == -1) {
+    dropzone.files.forEach(file => {
+      if (cxr.state.filesToProcess.indexOf(file) == -1) {
         status(`adding ${file.name}`);
         cxr.state.filesToProcess.unshift(file);
       }
@@ -144,8 +146,6 @@
 
   function predictFromBase64Image(name, rows, columns, imageString) {
     imageArray = Base64Binary.decode(imageString);
-    cxr.imageMatrix = cv.matFromArray(rows, columns, cv.CV_8UC3, imageArray);
-    cv.imshow('cxrCanvas', cxr.imageMatrix);
     predictFromImageSource(name, cxr.imageCanvas.toDataURL("image/png"));
   }
 
@@ -156,45 +156,65 @@
       dataURL: cxr.imageElement.src,
     }
     cxr.imageElement.onload = function () {
-      equalizeImageToCanvas()
-      .then(predictResultFromCanvas);
+      equalizeImageToFloatArray()
+      .then(predictResultFromFloatArray);
     }
   }
 
-  function equalizeImageToCanvas() {
-    // uses global element and canvas
+  function equalizeImageToFloatArray(fileName, fileContents) {
+    console.log(fileContents);
     return new Promise((resolve, reject) => {
-      cxr.imageMatrix = cv.imread(cxr.imageElement); // TODO: normalize in cv
-console.log(cv.mean(cxr.imageMatrix));
-      const message = cvImageToMessageData(cxr.imageMatrix);
-      cxr.imageMatrix.delete();
-      message.request = "equalize";
-      const worker = new Worker("worker.js");
-      worker.addEventListener("message", (message) => {
-        cxr.imageMatrix = messageDataToCvImage(message.data);
-        cv.imshow('cxrCanvas', cxr.imageMatrix);
 
-        //cxr.imageMatrix.delete(); TODO: delete this
+      status(`Equalizing: preparing input ${fileName}`);
+      FS.writeFile(fileName, fileContents, {encoding: "binary"});
 
-        worker.terminate();
-        message.data.cvImage = cxr.imageMatrix;
-        resolve(message.data);
-      });
-      worker.postMessage(message);
+      status('Equalizing: equalizing');
+      const [imageWidth, imageHeight] = [1024, 1024];
+      const sizeofFloat32 = 4;
+      const imagePixelCount = imageWidth*imageHeight;
+      const imageComponents = 3;
+      const imageFloat32Count = imagePixelCount * imageComponents;
+      const imageByteCount = imageFloat32Count * sizeofFloat32;
+      const imageFilePath = `equalized_output.${imageComponents == 3 ? "rgb" : "gray"}`;
+
+      const normalize = `-resize ${imageWidth}x${imageHeight}! -filter Lanczos`;
+      const clahe = `-clahe 12.5x12.5%+256+10`;
+      const dataType = `-define quantum:format=floating-point -depth 32`;
+      const command = `${fileName} ${normalize} ${dataType} ${imageFilePath}`;
+      console.log('magick ' + command);
+
+      magick.run(command.split(" "));
+
+      status('Equalizing: making pixelarray');
+      const bytes = new Uint8Array(imageByteCount);
+      const stream = FS.open(imageFilePath, "r");
+      FS.read(stream, bytes, 0, imageByteCount);
+      FS.close(stream);
+      floatArray = new Float32Array(bytes.buffer);
+      pixelArray = new Uint8ClampedArray(floatArray.byteLength);
+
+      /* TODO:
+      for (let row = 0; row < imageHeight; ++row) {
+        for (let column = 0; column < imageWidth; ++column) {
+          const value = floatArray[(row*imageWidth + column) * imageComponents] * 255;
+          let index = (row*imageWidth + column) * 4;
+          pixelArray[index]   = value;    // red
+          pixelArray[++index] = value;    // green
+          pixelArray[++index] = value;    // blue
+          pixelArray[++index] = 255;      // alpha
+        }
+      }
+      */
+      status('Equalizing: resolving');
+
+      resolve({floatArray, pixelArray});
     });
   }
 
-  function predictResultFromCanvas(result) {
+  function predictResultFromFloatArray(result) {
     status(`Predicting ${cxr.state.predictingFile.name}...`);
-    //const tensor = tf.browser.fromPixels(cxr.imageCanvas).div(255);
-    //const reshapedTensor = tensor.reshape([-1, cxr.imageElement.height, cxr.imageElement.width, 3]);
-    console.log(result);
-    const range = result.result.upper - result.result.lower;
     const shape = [1, cxr.imageElement.height, cxr.imageElement.width, 3];
-    const imageTensor = tf.buffer(shape, "float32", result.cvImage.data32F).toTensor();
-    cxr.imageTensorPre = imageTensor;
-    imageTensor.sub(result.result.lower).mul(1./range).clipByValue(0, 1);
-    cxr.imageTensorPost = imageTensor;
+    const imageTensor = tf.buffer(shape, "float32", result.floatArray).toTensor();
     predictionTensor = model.predict(imageTensor, {verbose: true})
     predictionTensor.data()
     .then(data => {
@@ -283,6 +303,7 @@ console.log(cv.mean(cxr.imageMatrix));
     if (cxr.state.predictingFile
           || cxr.state.filesToProcess.length == 0
           || !model
+          || !magick
       ) {
       console.log('triggered, but nothing to predict');
       console.log('predicting', cxr.state.predictingFile);
@@ -291,15 +312,20 @@ console.log(cv.mean(cxr.imageMatrix));
     }
     const file = cxr.state.filesToProcess.pop();
     cxr.state.predictingFile = file;
-    setTimeout(() => {
+    console.log(file);
+    const fileReader = new FileReader();
+    fileReader.readAsArrayBuffer(file);
+    fileReader.addEventListener('progress', (event) => {
+      status(`${event.loaded} bytes loaded`);
+    });
+    fileReader.addEventListener('loadend', (event) => {
+      dropzone.removeFile(cxr.state.predictingFile);
       cxr.imageElement.src = cxr.state.predictingFile.dataURL;
-      cxr.imageElement.onload = function() {
-        dropzone.removeFile(cxr.state.predictingFile);
-        status(`Equalizing ${cxr.state.predictingFile.name}...`);
-        equalizeImageToCanvas()
-        .then(predictResultFromCanvas);
-      }
-    }, 5);
+      status(`Equalizing ${cxr.state.predictingFile.name}...`);
+      const fileContents = new Uint8Array(event.target.result);
+      equalizeImageToFloatArray(cxr.state.predictingFile.name, fileContents)
+      .then(predictResultFromFloatArray);
+    });
   }
 
   function status(message) {
