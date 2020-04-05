@@ -182,7 +182,7 @@
       const median = `-median 3x3`;
       const clip = `-contrast-stretch 2%x2%`
       const dataType = `-define quantum:format=floating-point -depth 32`;
-      const command = `${fileName} ${normalize} ${median} ${clip} ${dataType} ${imageFilePath}`;
+      const command = `${fileName} ${normalize} ${clahe} ${median} ${clip} ${dataType} ${imageFilePath}`;
       console.log('magick ' + command);
 
       magick.run(command.split(" "));
