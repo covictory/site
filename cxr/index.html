@@ -179,8 +179,10 @@
 
       const normalize = `-resize ${imageWidth}x${imageHeight}! -filter Lanczos`;
       const clahe = `-clahe 12.5x12.5%+256+10`;
+      const median = `-median 3x3`;
+      const clip = `-contrast-stretch 2%x2%`
       const dataType = `-define quantum:format=floating-point -depth 32`;
-      const command = `${fileName} ${normalize} ${dataType} ${imageFilePath}`;
+      const command = `${fileName} ${normalize} ${median} ${clip} ${dataType} ${imageFilePath}`;
       console.log('magick ' + command);
 
       magick.run(command.split(" "));
@@ -321,9 +323,16 @@
     fileReader.addEventListener('loadend', (event) => {
       dropzone.removeFile(cxr.state.predictingFile);
       cxr.imageElement.src = cxr.state.predictingFile.dataURL;
-      status(`Equalizing ${cxr.state.predictingFile.name}...`);
+      const fileName = cxr.state.predictingFile.name;
+      status(`Equalizing ${fileName}...`);
       const fileContents = new Uint8Array(event.target.result);
-      equalizeImageToFloatArray(cxr.state.predictingFile.name, fileContents)
+
+      // TODO: pngtoy?
+      if (fileName.endsWith(".png")) {
+        window.fileContents = fileContents;
+      }
+
+      equalizeImageToFloatArray(fileName, fileContents)
       .then(predictResultFromFloatArray);
     });
   }
