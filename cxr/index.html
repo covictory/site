@@ -67,44 +67,63 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
   }
 
   //
-  // args and globals
+  // globals and config
   //
-  //const modelName = "CheXNet_acil-tfjs";
-  //const modelName = "modeltest-003-0.894167-0.769167.tfjs";
-  //let modelName = "modeltest-003-0.886000-0.806667.tfjs";
-  let modelName = "model-009-0.922879-0.799286.tfjs"
-  let modelURL = `https://storage.googleapis.com/cxr-models/${modelName}/model.json`;
-  let model;
-  let magick;
-
   const cxr = {
     imageElement : document.getElementById('cxrImage'),
     imageCanvas : document.getElementById('cxrCanvas'),
     imageMatrix : undefined,
     dropzoneElement : document.getElementById('cxrDropzone'),
     state : {
+      modelsLoaded : false,
       predictingFile : undefined,
       filesToProcess : [],
       filesProcessed : [],
     },
+    magick : undefined,
+    models : {
+      equalization : {
+        name : "equalization_model-100-0.003649-0.003183.tfjs",
+        url : undefined,
+        model : undefined,
+      },
+      prediction : {
+        name : "model-009-0.922879-0.799286.tfjs",
+        url : undefined,
+        model : undefined,
+      }
+    },
     options : {
       offerDownload : false,
+      useEqualizationModel : false,
     },
   };
+  Object.keys(cxr.models).forEach(key => {
+    cxr.models[key].url = `https://storage.googleapis.com/cxr-models/${cxr.models[key].name}/model.json`;
+  });
   cxr.imageElement.crossOrigin = "Anonymous";
 
+  //
+  // url query parameter args
+  //
   const url = new URL(document.location.href);
   const searchParams = new URLSearchParams(url.search);
   if (searchParams.has("imageURL")) {
+    alert(`Image URL query parameter is currently not supported`);
+    /* - TODO: update trigger prediction to use arraybuffer as alternative to FileReader
     // for example:
     // http://127.0.0.1:8080/?imageURL=https://storage.googleapis.com/cxr-data/chest-xray/test/PNEUMONIA/person100_bacteria_475.jpeg&offerDownload=true
     const imageURL = new URL(searchParams.get("imageURL"));
     const pathParts = imageURL.pathname.split("/")
     const name = pathParts[pathParts.length-1];
-    predictFromImageSource(name, searchParams.get("imageURL"));
+    predictFromImageURL(name, searchParams.get("imageURL"));
+    */
   }
-  if (searchParams.has("modelURL")) {
-    modelURL = searchParams.get("modelURL");
+  if (searchParams.has("predictionModelURL")) {
+    cxr.models.prediction.url = searchParams.get("predictionModelURL");
+  }
+  if (searchParams.has("equalizationModelURL")) {
+    cxr.models.equalization.url = searchParams.get("equalizationModelURL");
   }
   if (searchParams.has("offerDownload")) {
     if (searchParams.get("offerDownload") == "true") {
@@ -113,18 +132,23 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
   }
 
   //
-  // model
+  // Load tfjs models
   //
-  status('Downloading predictive model');
-  const modelLoadPromise = tf.loadLayersModel(modelURL, {
-    onProgress: (fraction) => {status(`${(fraction * 100).toFixed(1)}% loaded...`);},
+  status('Downloading models');
+  const modelPromises = [];
+  Object.keys(cxr.models).forEach(key => {
+    modelPromises.unshift(tf.loadLayersModel(cxr.models[key].url, {
+      onProgress: (fraction) => { status(`${(fraction * 100).toFixed(1)}% of ${key} model loaded...`); },
+    }));
   });
-
-  modelLoadPromise
-  .then(loadedModel => {
-    model = loadedModel;
-    status("Model is ready");
+  Promise.all(modelPromises)
+  .then(loadedModels => {
+    Object.keys(cxr.models).forEach(key => {
+      cxr.models[key] = loadedModels.pop();
+    });
+    cxr.state.modelsLoaded = true;
     triggerPrediction()
+    status("Models are ready");
   });
 
   //
@@ -132,7 +156,7 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
   //
   function onMagickDependenciesFullfilled() {
     console.log("Magick is ready");
-    magick = Module;
+    cxr.magick = Module;
     triggerPrediction();
   }
 
@@ -150,21 +174,26 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
     triggerPrediction();
   }
 
+  // called from python wrapper for testing
+  // TODO
   function predictFromBase64Image(name, rows, columns, imageString) {
     imageArray = Base64Binary.decode(imageString);
     predictFromImageSource(name, cxr.imageCanvas.toDataURL("image/png"));
   }
 
-  function predictFromImageSource(name, imageSource) {
-    cxr.imageElement.src = imageSource;
-    cxr.state.predictingFile = {
-      name: name,
-      dataURL: cxr.imageElement.src,
-    }
-    cxr.imageElement.onload = function () {
-      equalizeImageToFloatArray()
+  function predictFromImageURL(name, imageURL) {
+    const imageRequest = new XMLHttpRequest();
+    imageRequest.open("GET", imageURL);
+    imageRequest.responseType = "arraybuffer";
+    imageRequest.onload = (event) => {
+      cxr.state.predictingFile = {
+        name: name,
+        dataURL: imageRequest.response,
+      }
+      equalizeImageToFloatArray(imageURL, imageRequest.response)
       .then(predictResultFromFloatArray);
     }
+    imageRequest.send(null);
   }
 
   function equalizeImageToFloatArray(fileName, fileContents) {
@@ -175,23 +204,28 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
       FS.writeFile(fileName, fileContents, {encoding: "binary"});
 
       status('Equalizing: equalizing');
+      const imageComponents = cxr.options.useEqualizationModel ? 1 : 3
       const [imageWidth, imageHeight] = [1024, 1024];
       const sizeofFloat32 = 4;
       const imagePixelCount = imageWidth*imageHeight;
-      const imageComponents = 3;
       const imageFloat32Count = imagePixelCount * imageComponents;
       const imageByteCount = imageFloat32Count * sizeofFloat32;
       const imageFilePath = `equalized_output.${imageComponents == 3 ? "rgb" : "gray"}`;
 
       const normalize = `-resize ${imageWidth}x${imageHeight}! -filter Lanczos`;
       const clahe = `-clahe 12.5x12.5%+256+10`;
-      const median = `-median 3x3`;
+      const median = `-statistic Median 3x3`;
       const clip = `-contrast-stretch 2%x2%`
       const dataType = `-define quantum:format=floating-point -depth 32`;
-      const command = `${fileName} ${normalize} ${clahe} ${median} ${clip} ${dataType} ${imageFilePath}`;
+      let command;
+      if (cxr.options.useEqualizationModel) {
+        command = `${fileName} ${normalize} ${dataType} ${imageFilePath}`;
+      } else {
+        command = `${fileName} ${normalize} ${clahe} ${median} ${clip} ${dataType} ${imageFilePath}`;
+      }
       console.log('magick ' + command);
 
-      magick.run(command.split(" "));
+      cxr.magick.run(command.split(" "));
 
       status('Equalizing: making pixelarray');
       const bytes = new Uint8Array(imageByteCount);
@@ -221,9 +255,16 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
 
   function predictResultFromFloatArray(result) {
     status(`Predicting ${cxr.state.predictingFile.name}...`);
-    const shape = [1, cxr.imageElement.height, cxr.imageElement.width, 3];
-    const imageTensor = tf.buffer(shape, "float32", result.floatArray).toTensor();
-    predictionTensor = model.predict(imageTensor, {verbose: true})
+    let equalizedTensor;
+    if (cxr.options.useEqualizationModel) {
+      const equalizingShape = [1, cxr.imageElement.height, cxr.imageElement.width, 1];
+      const imageTensor = tf.buffer(equalizingShape, "float32", result.floatArray).toTensor();
+      equalizedTensor = cxr.models.equalization.predict(imageTensor, {verbose: true});
+    } else {
+      const predictionShape = [1, cxr.imageElement.height, cxr.imageElement.width, 3];
+      equalizedTensor = tf.buffer(predictionShape, "float32", result.floatArray).toTensor();
+    }
+    const predictionTensor = cxr.models.prediction.predict(equalizedTensor, {verbose: true});
     predictionTensor.data()
     .then(data => {
       finalizePrediction({
@@ -310,12 +351,10 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
   function triggerPrediction() {
     if (cxr.state.predictingFile
           || cxr.state.filesToProcess.length == 0
-          || !model
-          || !magick
+          || !cxr.state.modelsLoaded
+          || !cxr.magick
       ) {
-      console.log('triggered, but nothing to predict');
-      console.log('predicting', cxr.state.predictingFile);
-      console.log('cxr.state.filesToProcess', cxr.state.filesToProcess);
+      console.log('triggered, but not yet ready or nothing to do');
       return;
     }
     const file = cxr.state.filesToProcess.pop();
@@ -333,8 +372,8 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
       status(`Equalizing ${fileName}...`);
       const fileContents = new Uint8Array(event.target.result);
 
-      // TODO: pngtoy?
       if (fileName.endsWith(".png")) {
+        console.log("What to do with png?");
         window.fileContents = fileContents;
       }
 
