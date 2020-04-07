@@ -26,3 +26,6 @@ tags
 
 # ignore the sample images
 samples
+
+# ignore mac junk
+.DS_Store
