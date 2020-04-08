@@ -216,23 +216,25 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
       const imageFloat32Count = imagePixelCount * imageComponents;
       const imageByteCount = imageFloat32Count * sizeofFloat32;
       const imageFilePath = `equalized_output.${imageComponents == 3 ? "rgb" : "gray"}`;
+      const imageJPGFilePath = `equalized_output.jpg`;
 
       const normalize = `-resize ${imageWidth}x${imageHeight}! -filter Lanczos`;
       const clahe = `-clahe 12.5x12.5%+256+10`;
       const median = `-statistic Median 3x3`;
       const clip = `-contrast-stretch 2%x2%`
-      const dataType = `-define quantum:format=floating-point -depth 32`;
-      let command;
+      const depth = `-depth 32`;
+      const dataType = `-define quantum:format=floating-point`;
+      let equalizingCommand, resultImageCommand;
       if (cxr.options.useEqualizationModel) {
-        command = `${fileName} ${normalize} ${dataType} ${imageFilePath}`;
+        equalizingCommand = `${fileName} ${normalize} ${dataType} ${depth} ${imageFilePath}`;
       } else {
-        command = `${fileName} ${normalize} ${clahe} ${median} ${clip} ${dataType} ${imageFilePath}`;
+        equalizingCommand = `${fileName} ${normalize} ${clahe} ${median} ${clip} ${dataType} ${depth} ${imageFilePath}`;
       }
-      console.log('magick ' + command);
 
-      cxr.magick.run(command.split(" "));
+      console.log('magick ' + equalizingCommand);
+      cxr.magick.run(equalizingCommand.split(" "));
 
-      status('Equalizing: making pixelarray');
+      status('Equalizing: making floatarray');
       const bytes = new Uint8Array(imageByteCount);
       const stream = FS.open(imageFilePath, "r");
       FS.read(stream, bytes, 0, imageByteCount);
