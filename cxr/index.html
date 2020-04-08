@@ -149,7 +149,7 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
   Promise.all(modelPromises)
   .then(loadedModels => {
     Object.keys(cxr.models).forEach(key => {
-      cxr.models[key] = loadedModels.pop();
+      cxr.models[key].model = loadedModels.pop();
     });
     cxr.state.modelsLoaded = true;
     triggerPrediction()
@@ -264,12 +264,12 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
     if (cxr.options.useEqualizationModel) {
       const equalizingShape = [1, cxr.imageElement.height, cxr.imageElement.width, 1];
       const imageTensor = tf.buffer(equalizingShape, "float32", result.floatArray).toTensor();
-      equalizedTensor = cxr.models.equalization.predict(imageTensor, {verbose: true});
+      equalizedTensor = cxr.models.equalization.model.predict(imageTensor, {verbose: true});
     } else {
       const predictionShape = [1, cxr.imageElement.height, cxr.imageElement.width, 3];
       equalizedTensor = tf.buffer(predictionShape, "float32", result.floatArray).toTensor();
     }
-    const predictionTensor = cxr.models.prediction.predict(equalizedTensor, {verbose: true});
+    const predictionTensor = cxr.models.prediction.model.predict(equalizedTensor, {verbose: true});
     predictionTensor.data()
     .then(data => {
       finalizePrediction({
