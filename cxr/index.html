@@ -83,12 +83,12 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
     magick : undefined,
     models : {
       equalization : {
-        name : "equalization_model-100-0.003649-0.003183.tfjs",
+        defaultModelName : "equalization_model-100-0.003649-0.003183.tfjs",
         url : undefined,
         model : undefined,
       },
       prediction : {
-        name : "model-009-0.922879-0.799286.tfjs",
+        defaultModelName : "model-009-0.922879-0.799286.tfjs",
         url : undefined,
         model : undefined,
       }
@@ -99,7 +99,7 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
     },
   };
   Object.keys(cxr.models).forEach(key => {
-    cxr.models[key].url = `https://storage.googleapis.com/cxr-models/${cxr.models[key].name}/model.json`;
+    cxr.models[key].url = `https://storage.googleapis.com/cxr-models/${cxr.models[key].defaultModelName}/model.json`;
   });
   cxr.imageElement.crossOrigin = "Anonymous";
 
