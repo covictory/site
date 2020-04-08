@@ -240,23 +240,23 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
       FS.read(stream, bytes, 0, imageByteCount);
       FS.close(stream);
       floatArray = new Float32Array(bytes.buffer);
-      pixelArray = new Uint8ClampedArray(floatArray.byteLength);
 
-      /* TODO:
-      for (let row = 0; row < imageHeight; ++row) {
-        for (let column = 0; column < imageWidth; ++column) {
-          const value = floatArray[(row*imageWidth + column) * imageComponents] * 255;
-          let index = (row*imageWidth + column) * 4;
-          pixelArray[index]   = value;    // red
-          pixelArray[++index] = value;    // green
-          pixelArray[++index] = value;    // blue
-          pixelArray[++index] = 255;      // alpha
-        }
-      }
-      */
+      status('Equalizing: making jpg');
+      const jpgSize = `-size ${imageHeight}x${imageWidth}`;
+      jpgCommand = `${jpgSize} ${depth} ${dataType} ${imageFilePath} ${imageJPGFilePath}`;
+      console.log('magick ' + jpgCommand);
+      cxr.magick.run(jpgCommand.split(" "));
+      const stat = FS.stat(imageJPGFilePath);
+      const jpgbytes = new Uint8Array(stat.size);
+      const jpgstream = FS.open(imageJPGFilePath, "r");
+      FS.read(jpgstream, jpgbytes, 0, stat.size);
+      FS.close(jpgstream);
+      const jpgblob = new Blob([jpgbytes.buffer], {type: "image/jpeg"});
+      cxr.imageElement.src = URL.createObjectURL(jpgblob);
+
       status('Equalizing: resolving');
 
-      resolve({floatArray, pixelArray});
+      resolve({floatArray});
     });
   }
 
