@@ -130,6 +130,11 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
       cxr.options.offerDownload = true;
     }
   }
+  if (searchParams.has("useEqualizationModel")) {
+    if (searchParams.get("useEqualizationModel") == "true") {
+      cxr.options.useEqualizationModel = true;
+    }
+  }
 
   //
   // Load tfjs models
