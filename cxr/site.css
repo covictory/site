@@ -1,5 +1,7 @@
-BODY {
+BODY, html {
 	font-family: Helvetica, Arial, Sans-Serif;
+  margin: 0;
+  padding: 0;
 }
 
 @media only screen and (max-width: 100em) {
@@ -8,13 +10,18 @@ BODY {
    }
 }
 
+#cxrLogo {
+    display: block;
+    margin: 0 auto;
+}
+
+#subtitle {
+  text-align: center;
+}
+
 BODY H1 {
   background: #aaa;
   width: 100%;
-  height: 3em;
-  left: 3em;
+  text-align: center;
 }
 
-#page {
-	margin: auto;
-}
