@@ -31,6 +31,7 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
 <script src="thirdparty/dropzone.min.js"> </script>
 <script src="thirdparty/jszip.min.js"> </script>
 <script src="thirdparty/magick.js"> </script>
+<script src="thirdparty/pngdump.js"> </script>
 <link rel="stylesheet" href="thirdparty/dropzone.min.css"/>
 
 </head>
@@ -41,7 +42,7 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
 
 <h1>CXR Pandemic Control Tool for Detection of Early Pneumonias</h1>
 
-<img id="cxrLogo" src="covictory.svg" width=50></img>
+<img id="cxrLogo" src="covictory.svg" width=75></img>
 
 <p id="subtitle">For informational use only. Not validated for any purpose.<br>For more information about this app see <a href="http://slowdowncovid19.org">slow down COVID19</a></p>
 
@@ -62,6 +63,7 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
  -->
 <img id="cxrImage" width=1024 height=1024></img>
 <canvas id="cxrCanvas" width=1024 height=1024></canvas>
+<canvas id="pngCanvas" width=1024 height=1024></canvas>
 
 
 <script>
@@ -171,6 +173,74 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
   }
 
   //
+  // pngdump
+  //
+  let pngBufferToImage;
+  pngdump().then(Module => {
+    const api = {
+      mallocBuffer: Module.cwrap('mallocBuffer', 'number', ['number']),
+      freeBuffer: Module.cwrap('freeBuffer', '', ['number']),
+      makeFileEmulator: Module.cwrap('makeFileEmulator', 'number', ['number', 'number']),
+      destroyFileEmulator: Module.cwrap('destroyFileEmulator', '', []),
+      readHeader: Module.cwrap('readHeader', 'number', ['number', 'number', 'number']),
+      readToFloatArray: Module.cwrap('readToFloatArray', '', ['number', 'number', 'number']),
+      png_create_read_struct: Module.cwrap('_png_create_read_struct', 'number', []),
+      png_create_info_struct: Module.cwrap('_png_create_info_struct', 'number', ['number']),
+      png_get_image_width: Module.cwrap('_png_get_image_width', 'number', ['number', 'number']),
+      png_get_image_height: Module.cwrap('_png_get_image_height', 'number', ['number', 'number']),
+    };
+    pngBufferToImage = (pngBuffer) => {
+      let pngData = api.mallocBuffer(pngBuffer.byteLength);
+      const pngArray = new Uint8Array(pngBuffer);
+      Module.HEAP8.set(pngArray, pngData);
+
+      const png_ptr = api.png_create_read_struct();
+      const info_ptr = api.png_create_info_struct(png_ptr);
+
+      const emulator = api.makeFileEmulator(pngData, pngBuffer.byteLength);
+      api.readHeader(png_ptr, info_ptr, emulator);
+
+      const sizeOfFloat = 4;
+      const width = api.png_get_image_width(png_ptr, info_ptr);
+      const height = api.png_get_image_height(png_ptr, info_ptr);
+      const pixelSize = width * height;
+      const pixelSizeBytes = pixelSize * sizeOfFloat;
+      const pixelPointer = api.mallocBuffer(pixelSizeBytes);
+      const pixelCount = api.readToFloatArray(png_ptr, info_ptr, pixelPointer);
+      const pixelUint8Array = new Uint8Array(Module.HEAP8.slice(pixelPointer, pixelPointer + pixelSizeBytes));
+
+      api.destroyFileEmulator(emulator);
+      api.freeBuffer(pixelPointer);
+      api.freeBuffer(pngData);
+
+
+      const floatArray = new Float32Array(pixelUint8Array.buffer);
+      window.setTimeout(() => {
+        const charPixels = new Uint8ClampedArray(floatArray.buffer.byteLength);
+        const factor = 255 / 2**16;
+        for (let index = 0; index < pixelSize; index++) {
+          charPixels[4*index+0] = factor * floatArray[index];
+          charPixels[4*index+1] = factor * floatArray[index];
+          charPixels[4*index+2] = factor * floatArray[index];
+          charPixels[4*index+3] = 255;
+        }
+
+        console.log('pixels ', floatArray);
+        console.log('char pixels ', charPixels);
+
+        const canvas = document.getElementById("pngCanvas");
+        canvas.setAttribute("width", width);
+        canvas.setAttribute("height", height);
+        const context = canvas.getContext("2d");
+        const imageData = new ImageData(charPixels, width, height);
+        context.putImageData(imageData, 0,0);
+      }, 1);
+
+      return({pixelUint8Array, width, height});
+    }
+  });
+
+  //
   // file processing and prediction
   //
   function checkAcceptedFiles(file) {
@@ -207,11 +277,22 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
   }
 
   function equalizeImageToFloatArray(fileName, fileContents) {
-    console.log(fileContents);
     return new Promise((resolve, reject) => {
+
+      let fileNameArgs = fileName;
+      if (fileName.endsWith(".gray")) {
+        const elements = fileName.split(".");
+        const width = elements[elements.length-3];
+        const height = elements[elements.length-2];
+        fileNameArgs = `-define quantum:format=floating-point -size ${width}x${height} -depth 32 -endian LSB ${fileName}`;
+      }
 
       status(`Equalizing: preparing input ${fileName}`);
       FS.writeFile(fileName, fileContents, {encoding: "binary"});
+
+      identifyCommand = `-identify ${fileNameArgs}`;
+      console.log('magick ' + identifyCommand);
+      cxr.magick.run(identifyCommand.split(" "));
 
       status('Equalizing: equalizing');
       const imageComponents = cxr.options.useEqualizationModel ? 1 : 3
@@ -222,18 +303,18 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
       const imageByteCount = imageFloat32Count * sizeofFloat32;
       const imageFilePath = `equalized_output.${imageComponents == 3 ? "rgb" : "gray"}`;
       const imageJPGFilePath = `equalized_output.jpg`;
+      const jpgSize = `-size ${imageHeight}x${imageWidth}`;
 
       const normalize = `-resize ${imageWidth}x${imageHeight}! -filter Lanczos`;
       const clahe = `-clahe 12.5x12.5%+256+10`;
       const median = `-statistic Median 3x3`;
       const clip = `-contrast-stretch 2%x2%`
-      const depth = `-depth 32`;
-      const dataType = `-define quantum:format=floating-point`;
+      const dataType = `-define quantum:format=floating-point -depth 32 -endian LSB`;
       let equalizingCommand, resultImageCommand;
       if (cxr.options.useEqualizationModel) {
-        equalizingCommand = `${fileName} ${normalize} ${dataType} ${depth} ${imageFilePath}`;
+        equalizingCommand = `${fileNameArgs} ${normalize} ${dataType} ${imageFilePath}`;
       } else {
-        equalizingCommand = `${fileName} ${normalize} ${clahe} ${median} ${clip} ${dataType} ${depth} ${imageFilePath}`;
+        equalizingCommand = `${fileNameArgs} ${normalize} ${clahe} ${median} ${clip} ${dataType} ${imageFilePath}`;
       }
 
       console.log('magick ' + equalizingCommand);
@@ -247,8 +328,7 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
       floatArray = new Float32Array(bytes.buffer);
 
       status('Equalizing: making jpg');
-      const jpgSize = `-size ${imageHeight}x${imageWidth}`;
-      jpgCommand = `${jpgSize} ${depth} ${dataType} ${imageFilePath} ${imageJPGFilePath}`;
+      jpgCommand = `${jpgSize} ${dataType} ${imageFilePath} ${imageJPGFilePath}`;
       console.log('magick ' + jpgCommand);
       cxr.magick.run(jpgCommand.split(" "));
       const stat = FS.stat(imageJPGFilePath);
@@ -282,7 +362,7 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
       finalizePrediction({
         name : cxr.state.predictingFile.name,
         headerText : `Results for: ${cxr.state.predictingFile.name}`,
-        thumbnailSoure : cxr.state.predictingFile.dataURL,
+        thumbnailSource : cxr.state.predictingFile.dataURL,
         probabilities : {
           normal : data[0],
           mild : data[1],
@@ -316,7 +396,7 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
     results.appendChild(resultTable);
     // fill in values
     header.innerText = prediction.headerText;
-    reportThumbndail.src = prediction.thumbnailSoure;
+    reportThumbndail.src = prediction.thumbnailSource;
     const keyMap = {
       normal : "normal",
       mild : "mild",
@@ -380,15 +460,16 @@ supported by the National Institute of Biomedical Imaging and Bioengineering (NI
     fileReader.addEventListener('loadend', (event) => {
       dropzone.removeFile(cxr.state.predictingFile);
       cxr.imageElement.src = cxr.state.predictingFile.dataURL;
-      const fileName = cxr.state.predictingFile.name;
+      let fileName = cxr.state.predictingFile.name;
       status(`Equalizing ${fileName}...`);
-      const fileContents = new Uint8Array(event.target.result);
-
+      let fileContents;
       if (fileName.endsWith(".png")) {
-        console.log("What to do with png?");
-        window.fileContents = fileContents;
+        image = pngBufferToImage(event.target.result);
+        fileContents = image.pixelUint8Array;
+        fileName += `.${image.width}.${image.height}.gray`;
+      } else {
+        fileContents = new Uint8Array(event.target.result);
       }
-
       equalizeImageToFloatArray(fileName, fileContents)
       .then(predictResultFromFloatArray);
     });
