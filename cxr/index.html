@@ -407,13 +407,30 @@ var Module = {
 // code that needs to execute after document body is loaded
 //
 (function() {
+
   Dropzone.autoDiscover = false;
   dropzone = new Dropzone(cxr.dropzoneElement, {
     autoProcessQueue: true,
     parallelUploads: 1,
   });
   dropzone.on("error", checkAcceptedFiles);
+
+  document.addEventListener('paste', (event) => {
+    console.log(event);
+    Object.values(event.clipboardData.files).forEach(file => {
+      file.arrayBuffer()
+      .then(arrayBuffer => {
+        cxr.state.predictingFile = file;
+        const  fileContents = new Uint8Array(arrayBuffer);
+        equalizeImageToFloatArray(file.name, fileContents)
+        .then(predictResultFromFloatArray);
+      });
+    });
+  });
 })();
+
+
+
 </script>
 
 </body>
